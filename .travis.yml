@@ -36,7 +36,7 @@ addons:
     - libmemcache-dev
   coverity_scan:
     project:
-      name: opensips/opensips
+      name: OpenSIPS/opensips
       version: 2.2
       description: OpenSIPS Coverity Scan
     notification_email: razvan@opensips.org
