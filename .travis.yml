@@ -3,6 +3,8 @@ compiler: gcc
 sudo: false
 env:
   global:
+  - FASTER=1
+  - exclude_modules="db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb"
   - secure: EzISU9zc4ynjrtNWURs70A/x5H8Ng2IJWblduTuLfUHwrQPLeB+N/KBH7LyrNm/CW0dkMpK+wwfE00YVHMTnTV4FViaN2AgNL1sEGB56UNKvgeqo4ZZcTIUCmMpxA370nI3R6wPAvSAaEKTQ45m9fg6Nul8qT2GuD+zi9Llz5dg=
 addons:
   apt:
@@ -40,6 +42,6 @@ addons:
       version: 2.2
       description: OpenSIPS Coverity Scan
     notification_email: razvan@opensips.org
-    build_command: make exclude_modules=\"db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb\" all
+    build_command: make all
     branch_pattern: coverity_scan
-script:  if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then FASTER=1 make exclude_modules="db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb" all; fi
+script:  if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then make all; fi
