@@ -1,34 +1,45 @@
 language: c
 compiler: gcc
 sudo: false
+env:
+  global:
+  - secure: EzISU9zc4ynjrtNWURs70A/x5H8Ng2IJWblduTuLfUHwrQPLeB+N/KBH7LyrNm/CW0dkMpK+wwfE00YVHMTnTV4FViaN2AgNL1sEGB56UNKvgeqo4ZZcTIUCmMpxA370nI3R6wPAvSAaEKTQ45m9fg6Nul8qT2GuD+zi9Llz5dg=
 addons:
-    apt:
-        packages:
-            - flex
-            - bison
-            - libsqlite3-dev
-            - libsctp-dev
-            - libradiusclient-ng-dev
-            - libhiredis-dev
-            - unixodbc-dev
-            - libconfuse-dev
-            - libmysqlclient-dev
-            - libexpat1-dev
-            - libxml2-dev
-            - libpq-dev
-            - zlib1g-dev
-            - libperl-dev
-            - libsnmp-dev
-            - libdb-dev
-            - libldap2-dev
-            - libcurl4-gnutls-dev
-            - libgeoip-dev
-            - libpcre3-dev
-            - libmemcached-dev
-            - libmicrohttpd-dev
-            - librabbitmq-dev
-            - liblua5.1-0-dev
-            - libncurses5-dev
-            - libjson0-dev
-            - libmemcache-dev
-script: FASTER=1 make exclude_modules="db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb" all
+  apt:
+    packages:
+    - flex
+    - bison
+    - libsqlite3-dev
+    - libsctp-dev
+    - libradiusclient-ng-dev
+    - libhiredis-dev
+    - unixodbc-dev
+    - libconfuse-dev
+    - libmysqlclient-dev
+    - libexpat1-dev
+    - libxml2-dev
+    - libpq-dev
+    - zlib1g-dev
+    - libperl-dev
+    - libsnmp-dev
+    - libdb-dev
+    - libldap2-dev
+    - libcurl4-gnutls-dev
+    - libgeoip-dev
+    - libpcre3-dev
+    - libmemcached-dev
+    - libmicrohttpd-dev
+    - librabbitmq-dev
+    - liblua5.1-0-dev
+    - libncurses5-dev
+    - libjson0-dev
+    - libmemcache-dev
+  coverity_scan:
+    project:
+      name: opensips/opensips
+      version: 2.2
+      description: OpenSIPS Coverity Scan
+    notification_email: razvan@opensips.org
+    build_command: make exclude_modules="db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb" all
+    branch_pattern: coverity_scan
+script:  if [ ${COVERITY_SCAN_BRANCH} != 1 ]; then FASTER=1 make exclude_modules="db_oracle osp sngtc cachedb_cassandra cachedb_couchbase cachedb_mongodb" all; fi
