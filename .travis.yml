@@ -1,7 +1,5 @@
 language: c
-compiler:
-    - gcc
-    - clang
+compiler: gcc
 sudo: false
 env:
   global:
