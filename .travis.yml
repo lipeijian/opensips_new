@@ -1,7 +1,6 @@
 language: c
 compiler:
     - gcc
-    - clang
 sudo: false
 env:
   global:
