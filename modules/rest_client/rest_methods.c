@@ -31,6 +31,26 @@
 #include "../../async.h"
 #include "rest_methods.h"
 #include "rest_cb.h"
+#include "../siptrace/siptrace.h"
+#include "../../ip_addr.h"
+#include "../../resolve.h"
+
+/* INADDR_LOOPBACK is internally stored in network byte order;
+ * we need little endian so we'll define our own loopback address */
+#define REST_INADDR_LOOPBACK	((in_addr_t) 0x0100007f) /* Inet 127.0.0.1.  */
+#define TRACE_BUF_MAX_SIZE 1024
+
+static char req_buf[TRACE_BUF_MAX_SIZE];
+static char repl_buf[TRACE_BUF_MAX_SIZE];
+static rest_trace_param_t trace_param;
+
+extern siptrace_api_t siptrace_api;
+extern trace_type_id_t rest_type_id;
+
+
+static inline int extract_host(str* url, char** host, unsigned int* port);
+static inline int trace_enabled(void);
+static int trace_rest_message(str* host, str* dest, str* body, str* correlation_id);
 
 static char print_buff[MAX_CONTENT_TYPE_LEN];
 
@@ -47,7 +67,6 @@ static int read_fds[FD_SETSIZE];
 static int running_handles;
 
 static long sleep_on_bad_timeout = 50; /* ms */
-
 
 #define clean_header_list \
 	do { \
@@ -66,6 +85,69 @@ static long sleep_on_bad_timeout = 50; /* ms */
 			goto cleanup; \
 		} \
 	} while (0)
+
+
+int trace_rest_request_cb(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr)
+{
+	int body_len;
+	str url_s, buf;
+
+	char* url;
+	rest_trace_param_t* rest_p = userptr;
+
+
+	if ( type == CURLINFO_HEADER_IN || type == CURLINFO_DATA_IN) {
+		if (rest_p->reply_str.len + size > TRACE_BUF_MAX_SIZE) {
+			LM_WARN("static buffer too small! increase TRACE_BUF_MAX_SIZE!\n");
+			/* it's ok; save what we've got */
+			return CURLE_OK;
+		}
+
+		memcpy(rest_p->reply_str.s+rest_p->reply_str.len, data, size);
+		rest_p->reply_str.len += size;
+	}
+
+	if ( type != CURLINFO_HEADER_OUT)
+		return CURLE_OK;
+
+	if (curl_easy_getinfo(handle, CURLINFO_EFFECTIVE_URL, &url) != CURLE_OK) {
+		LM_ERR("failed to fetch URL!\n");
+		/* continue normally */
+		return CURLE_OK;
+	}
+
+	url_s.s = url;
+	url_s.len = strlen(url);
+
+
+	if (rest_p->body) {
+		body_len = strlen(rest_p->body);
+		buf.len = size + body_len;
+
+
+		if (TRACE_BUF_MAX_SIZE < buf.len) {
+			LM_WARN("static buffer too small! increase TRACE_BUF_MAX_SIZE!\n");
+			buf.s = data;
+			buf.len = size;
+		} else {
+			buf.s = req_buf;
+			memcpy(buf.s, data, size);
+			memcpy(buf.s+size, rest_p->body, body_len);
+		}
+	} else {
+		buf.s = data;
+		buf.len = size;
+	}
+
+	if (trace_rest_message(NULL, &url_s, &buf, &rest_p->callid) < 0) {
+		/* no need to exit; curl worked ok, tracing failed */
+		LM_ERR("failed to trage rest request!\n");
+	}
+
+	return CURLE_OK;
+}
+
+
 
 static inline char is_new_transfer(int fd)
 {
@@ -119,7 +201,8 @@ static inline char del_transfer(int fd)
  */
 int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 					     char *url, char *req_body, char *req_ctype,
-					     CURL **out_handle, str *body, str *ctype)
+					     CURL **out_handle, str *body, str *ctype,
+						 rest_trace_param_t** rest_tparam_p)
 {
 	CURL *handle;
 	CURLcode rc;
@@ -130,6 +213,8 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	long retry_time;
 	int msgs_in_queue;
 	CURLMsg *cmsg;
+
+	rest_trace_param_t* rest_tparam;
 
 	if (transfers == FD_SETSIZE) {
 		LM_ERR("too many ongoing tranfers: %d\n", FD_SETSIZE);
@@ -145,6 +230,34 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	}
 
 	w_curl_easy_setopt(handle, CURLOPT_URL, url);
+
+	if (trace_enabled()) {
+		if (method == REST_CLIENT_POST) {
+			/* for post we need both request and reply buffers because we need
+			 * to concatenate the body with the headers for the request */
+			rest_tparam = pkg_malloc(sizeof(rest_trace_param_t)
+													+ 2 * TRACE_BUF_MAX_SIZE);
+			rest_tparam->body = (char *)(rest_tparam+1);
+			rest_tparam->reply_str.s = rest_tparam->body + TRACE_BUF_MAX_SIZE;
+		} else {
+			rest_tparam = pkg_malloc(sizeof(rest_trace_param_t)
+													+ TRACE_BUF_MAX_SIZE);
+			rest_tparam->reply_str.s = rest_tparam->body + TRACE_BUF_MAX_SIZE;
+		}
+
+		if (method == REST_CLIENT_POST)
+			rest_tparam->body = req_body;
+		else
+			rest_tparam->body = NULL;
+
+		rest_tparam->callid = msg->callid->body;
+
+		rest_tparam->reply_str.s = repl_buf;
+		rest_tparam->reply_str.len = 0;
+
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGDATA, rest_tparam);
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGFUNCTION, trace_rest_request_cb);
+	}
 
 	switch (method) {
 	case REST_CLIENT_POST:
@@ -269,6 +382,7 @@ busy_wait:
 success:
 	clean_header_list;
 	*out_handle = handle;
+	*rest_tparam_p = rest_tparam;
 	return fd;
 
 error:
@@ -276,7 +390,9 @@ error:
 	if (mrc != CURLM_OK)
 		LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
 
+
 cleanup:
+	pkg_free(rest_tparam);
 	clean_header_list;
 	curl_easy_cleanup(handle);
 	return ASYNC_NO_IO;
@@ -291,6 +407,9 @@ enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_pa
 	long http_rc;
 	fd_set rset, wset, eset;
 	pv_value_t val;
+
+	char* url;
+	str url_s;
 
 	mrc = curl_multi_perform(multi_handle, &running);
 	if (mrc != CURLM_OK) {
@@ -348,6 +467,13 @@ enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_pa
 		return -1;
 	}
 
+	if (curl_easy_getinfo(param->handle, CURLINFO_EFFECTIVE_URL, &url) != CURLE_OK) {
+		LM_ERR("failed to fetch URL!\n");
+		/* continue normally */
+		return -1;
+	}
+
+
 	mrc = curl_multi_remove_handle(multi_handle, param->handle);
 	if (mrc != CURLM_OK) {
 		LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
@@ -381,6 +507,15 @@ enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_pa
 			LM_ERR("failed to set output code pv\n");
 	}
 
+	url_s.s = url;
+	url_s.len = strlen(url);
+
+	/* trace the reply */
+	if (trace_rest_message( &url_s, NULL,
+				&param->rest_tparam->reply_str, &msg->callid->body) < 0)
+		LM_ERR("Failed to trace rest get reply!\n");
+
+	pkg_free(param->rest_tparam);
 	pkg_free(param->body.s);
 	if (param->ctype_pv && param->ctype.s)
 		pkg_free(param->ctype.s);
@@ -409,11 +544,25 @@ int rest_get_method(struct sip_msg *msg, char *url,
 	str st = { 0, 0 };
 	str body = { NULL, 0 }, tbody;
 
+	str url_s =  {url, strlen(url)};
+
 	handle = curl_easy_init();
 	if (!handle) {
 		LM_ERR("Init curl handle failed!\n");
 		clean_header_list;
 		return -1;
+	}
+
+	/* Trace the request */
+	if (trace_enabled()) {
+		trace_param.body = NULL;
+		trace_param.callid = msg->callid->body;
+
+		trace_param.reply_str.s = repl_buf;
+		trace_param.reply_str.len = 0;
+
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGDATA, &trace_param);
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGFUNCTION, trace_rest_request_cb);
 	}
 
 	if (header_list)
@@ -475,6 +624,10 @@ int rest_get_method(struct sip_msg *msg, char *url,
 		goto cleanup;
 	}
 
+	/* trace the reply */
+	if (trace_rest_message( &url_s, NULL, &trace_param.reply_str, &msg->callid->body) < 0)
+		LM_ERR("Failed to trace rest get reply!\n");
+
 	if (body.s) {
 		pkg_free(body.s);
 	}
@@ -518,6 +671,7 @@ int rest_post_method(struct sip_msg *msg, char *url, char *body, char *ctype,
 	str st = { 0, 0 };
 	str res_body = { NULL, 0 }, tbody;
 	pv_value_t pv_val;
+	str url_s =  {url, strlen(url)};
 
 	handle = curl_easy_init();
 	if (!handle) {
@@ -533,6 +687,17 @@ int rest_post_method(struct sip_msg *msg, char *url, char *body, char *ctype,
 
 	if (header_list)
 		w_curl_easy_setopt(handle, CURLOPT_HTTPHEADER, header_list);
+
+	if (trace_enabled()) {
+		trace_param.body = body;
+		trace_param.callid = msg->callid->body;
+
+		trace_param.reply_str.s = repl_buf;
+		trace_param.reply_str.len = 0;
+
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGDATA, &trace_param);
+		w_curl_easy_setopt(handle, CURLOPT_DEBUGFUNCTION, trace_rest_request_cb);
+	}
 
 	w_curl_easy_setopt(handle, CURLOPT_URL, url);
 
@@ -593,6 +758,10 @@ int rest_post_method(struct sip_msg *msg, char *url, char *body, char *ctype,
 		goto cleanup;
 	}
 
+	/* trace the reply */
+	if (trace_rest_message( &url_s, NULL, &trace_param.reply_str, &msg->callid->body) < 0)
+		LM_ERR("Failed to trace rest get reply!\n");
+
 	if (res_body.s) {
 		pkg_free(res_body.s);
 	}
@@ -629,7 +798,7 @@ int rest_append_hf_method(struct sip_msg *msg, str *hfv)
 	if (hfv->len > MAX_HEADER_FIELD_LEN) {
 		LM_ERR("header field buffer too small\n");
 		return -1;
-	}	
+	}
 
 	/* TODO: header validation */
 
@@ -637,5 +806,229 @@ int rest_append_hf_method(struct sip_msg *msg, str *hfv)
 	strncpy(buf, hfv->s, hfv->len);
 	header_list = curl_slist_append(header_list, buf);
 
-	return 1;		
+	return 1;
+}
+
+static inline int extract_host(str* url, char** host, unsigned int* port)
+{
+	unsigned int default_port;;
+
+	static const int http_port = 80;
+	static const int https_port = 443;
+
+	static char host_buf[MAX_HOST_LENGTH];
+	static const char port_delim = ':';
+	static const char host_delim = '/';
+
+	static const str http_id_s = str_init("http://");
+	static const str https_id_s = str_init("https://");
+
+	str* url_cpy = url;
+	str port_s;
+
+	char* host_end = NULL;
+	char* port_start = NULL;
+
+
+	if (url == NULL || host == NULL || port == NULL) {
+		LM_ERR("null parameters!\n");
+		return -1;
+	}
+
+	if (url->len > http_id_s.len) {
+		if(!strncmp(url->s, http_id_s.s, http_id_s.len)) {
+			url_cpy->s = url->s + http_id_s.len;
+			url_cpy->len = url->len - http_id_s.len;
+			default_port = http_port;
+		} else if (!strncmp(url->s, https_id_s.s, https_id_s.len)) {
+			url_cpy->s = url->s + https_id_s.len;
+			url_cpy->len = url->len - https_id_s.len;
+			default_port = https_port;
+		}
+	}
+
+	/* now try extracting the host and the port(if exists) */
+	host_end = q_memchr(url_cpy->s, host_delim, url_cpy->len);
+	port_start = q_memchr(url_cpy->s, port_delim, url_cpy->len);
+
+	if (port_start == NULL) { /* job done */
+		/* format: [http[s]://]<host>[/] */
+		if (host_end == NULL)
+			memcpy(host_buf, url_cpy->s, url_cpy->len);
+		else
+			memcpy(host_buf, url_cpy->s, host_end - url_cpy->s);
+
+		host_buf[url_cpy->len] = '\0';
+
+		*port = default_port;
+	} else {
+		/* format: [http[s]://]<host>:<port>[/] */
+		/* parse the port; get it's number */
+		if (host_end && port_start > host_end) {
+			/* this does not delimit port; it's after host delimiter */
+			port_start = NULL;
+		}
+
+		if (port_start) {
+			memcpy(host_buf, url_cpy->s, port_start - url_cpy->s);
+			host_buf[port_start-url_cpy->s] = '\0';
+
+			port_s.s = port_start+1;
+			if (host_end)
+				port_s.len = (int)(unsigned long)(host_end - (port_s.s - url_cpy->s));
+			else
+				port_s.len = url_cpy->len - (port_s.s - url_cpy->s);
+
+
+			if (str2int( &port_s, port) < 0) {
+				LM_ERR("invalid port <%.*s>!\n", port_s.len, port_s.s);
+				return -1;
+			}
+		} else {
+			memcpy(host_buf, url_cpy->s, host_end - url_cpy->s);
+			host_buf[host_end-url_cpy->s] = '\0';
+
+			*port = default_port;
+		}
+	}
+
+	*host = host_buf;
+
+	return 0;
+}
+
+/*
+ * FIXME only IPv4
+ */
+static inline unsigned long fix_host(char* host)
+{
+	str host_s = str_init(host);
+
+	struct ip_addr* addr;
+	struct addrinfo *res;
+
+	if ((addr=str2ip(&host_s))==NULL) {
+		if (getaddrinfo(host, NULL, NULL, &res) < 0) {
+			LM_ERR("Invalid host <%s>!\n", host);
+			/* ip 0.0.0.0 will be considered an error */
+			return 0;
+		}
+
+		return ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
+	}
+
+	return addr->u.addrl[0];
+}
+
+static inline int trace_enabled(void)
+{
+	/* no need to check trace_api functions since they are loaded at mod_init */
+	if (siptrace_api.trace_api == NULL) {
+		LM_DBG("siptrace api not loaded! aborting trace...\n");
+		return 0;
+	}
+
+	if (siptrace_api.is_id_traced(rest_type_id) == 0) {
+		LM_DBG("Rest module not traced! aborting trace...\n");
+		return 0;
+	}
+
+	return 1;
+}
+
+static int trace_rest_message(str* host, str* dest, str* body, str* correlation_id)
+{
+	int siptrace_id_hash=0;
+	const int proto = IPPROTO_TCP;
+
+	trace_dest send_dest, old_dest=NULL;
+	trace_message trace_msg;
+
+	union sockaddr_union to_su, from_su;
+
+	char* host_addr;
+	unsigned int port;
+
+	/* no need to check trace_api functions since they are loaded at mod_init */
+	if (siptrace_api.trace_api == NULL) {
+		LM_DBG("siptrace api not loaded! aborting trace...\n");
+		return 0;
+	}
+
+	if ((siptrace_id_hash=siptrace_api.is_id_traced(rest_type_id)) == 0) {
+		LM_DBG("Rest module not traced! aborting trace...\n");
+		return 0;
+	}
+
+	/* FIXME no IPv6 */
+	if (host) {
+		if (extract_host(host, &host_addr,&port) < 0){
+			LM_ERR("failed to extract host and port from <%.*s>!\n",
+					host->len, host->s);
+			return -1;
+		}
+
+		from_su.sin.sin_addr.s_addr = fix_host(host_addr);
+		if (from_su.sin.sin_addr.s_addr == 0) {
+			LM_ERR("invalid address <%s>!\n", host_addr);
+			return -1;
+		}
+
+		from_su.sin.sin_port = port;
+	} else {
+		from_su.sin.sin_addr.s_addr = REST_INADDR_LOOPBACK;
+		from_su.sin.sin_port = 0;
+	}
+
+	from_su.sin.sin_family = AF_INET;
+
+	/* FIXME no IPv6 */
+	if (dest) {
+		if (extract_host(dest, &host_addr,&port) < 0){
+			LM_ERR("failed to extract host and port from <%.*s>!\n",
+					host->len, host->s);
+			return -1;
+		}
+
+		to_su.sin.sin_addr.s_addr = fix_host(host_addr);
+		if (to_su.sin.sin_addr.s_addr == 0) {
+			LM_ERR("invalid address <%s>!\n", host_addr);
+			return -1;
+		}
+
+		to_su.sin.sin_port = port;
+	} else {
+		to_su.sin.sin_addr.s_addr = REST_INADDR_LOOPBACK;
+		to_su.sin.sin_port = 0;
+	}
+
+	to_su.sin.sin_family = AF_INET;
+
+	while((send_dest=siptrace_api.get_next_destination(old_dest, siptrace_id_hash))) {
+		trace_msg = siptrace_api.trace_api->create_trace_message(&from_su, &to_su,
+				proto, body, HEP_PROTO_TYPE_REST, send_dest);
+		if (trace_msg == NULL) {
+			LM_ERR("failed to create trace message!\n");
+			return -1;
+		}
+
+		if (correlation_id &&
+			siptrace_api.trace_api->add_trace_data(trace_msg, correlation_id->s,
+			correlation_id->len, TRACE_TYPE_STR, 0x0011/* correlation id*/, 0) < 0) {
+			LM_ERR("failed to add correlation id to the packet!\n");
+			return -1;
+		}
+
+		if (siptrace_api.trace_api->send_message(trace_msg, send_dest, NULL) < 0) {
+			LM_ERR("failed to send trace message!\n");
+			return -1;
+		}
+
+		siptrace_api.trace_api->free_message(trace_msg);
+
+		old_dest=send_dest;
+	}
+
+
+	return 0;
 }

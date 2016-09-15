@@ -33,6 +33,7 @@
 #include "../../mem/mem.h"
 #include "../../mem/shm_mem.h"
 #include "../../mod_fix.h"
+#include "../siptrace/siptrace.h"
 
 #include "rest_methods.h"
 
@@ -55,6 +56,13 @@ int ssl_verifyhost = 1;
 static int mod_init(void);
 static int child_init(int rank);
 static void mod_destroy(void);
+
+/* Tracing api */
+siptrace_api_t siptrace_api;
+/* id with which rest module will be identified by siptrace */
+trace_type_id_t rest_type_id;
+/* rest module string identifier */
+static const char* rest_id_s = "rest";
 
 /*
  * Fixup functions
@@ -210,6 +218,12 @@ static int mod_init(void)
 						 osips_calloc);
 
 	multi_handle = curl_multi_init();
+
+	/* try loading siptrace api */
+	if (load_siptrace_api(&siptrace_api) == 0) {
+		/* tracing module loaded */
+		rest_type_id = siptrace_api.register_type((char *)rest_id_s);
+	}
 
 	LM_INFO("Module initialized!\n");
 
@@ -368,7 +382,8 @@ static int w_async_rest_get(struct sip_msg *msg, async_resume_module **resume_f,
 	memset(param, '\0', sizeof *param);
 
 	read_fd = start_async_http_req(msg, REST_CLIENT_GET, url.s, NULL, NULL,
-				&param->handle, &param->body, ctype_pv ? &param->ctype : NULL);
+				&param->handle, &param->body, ctype_pv ? &param->ctype : NULL,
+				&param->rest_tparam);
 
 	/* error occurred; no transfer done */
 	if (read_fd == ASYNC_NO_IO) {
@@ -438,7 +453,8 @@ static int w_async_rest_post(struct sip_msg *msg, async_resume_module **resume_f
 	memset(param, '\0', sizeof *param);
 
 	read_fd = start_async_http_req(msg, REST_CLIENT_POST, url.s, body.s, ctype.s,
-				&param->handle, &param->body, ctype_pv ? &param->ctype : NULL);
+				&param->handle, &param->body, ctype_pv ? &param->ctype : NULL,
+				&param->rest_tparam);
 
 	/* error occurred; no transfer done */
 	if (read_fd == ASYNC_NO_IO) {

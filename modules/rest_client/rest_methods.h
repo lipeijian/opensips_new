@@ -30,6 +30,8 @@
 #include "../../error.h"
 #include "../../mem/mem.h"
 
+#define MAX_HOST_LENGTH 128
+
 extern CURLM *multi_handle;
 
 extern long connection_timeout;
@@ -46,11 +48,19 @@ enum rest_client_method {
 	REST_CLIENT_POST
 };
 
+typedef struct _rest_trace_param_ {
+	str callid;
+	char* body;
+	str reply_str;
+} rest_trace_param_t;
+
 typedef struct rest_async_param_ {
 	enum rest_client_method method;
 	CURL *handle;
 	str body;
 	str ctype;
+
+	rest_trace_param_t* rest_tparam;
 
 	pv_spec_p body_pv;
 	pv_spec_p ctype_pv;
@@ -64,7 +74,8 @@ int rest_post_method(struct sip_msg *msg, char *url, char *body, char *ctype,
 
 int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 					     char *url, char *req_body, char *req_ctype,
-					     CURL **out_handle, str *body, str *ctype);
+					     CURL **out_handle, str *body, str *ctype,
+						 rest_trace_param_t** rest_tparam_p);
 enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *param);
 
 int rest_append_hf_method(struct sip_msg *msg, str *hfv);
