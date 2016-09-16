@@ -35,9 +35,6 @@
 #include "../../ip_addr.h"
 #include "../../resolve.h"
 
-/* INADDR_LOOPBACK is internally stored in network byte order;
- * we need little endian so we'll define our own loopback address */
-#define REST_INADDR_LOOPBACK	((in_addr_t) 0x0100007f) /* Inet 127.0.0.1.  */
 #define TRACE_BUF_MAX_SIZE 1024
 
 static char req_buf[TRACE_BUF_MAX_SIZE];
@@ -976,7 +973,7 @@ static int trace_rest_message(str* host, str* dest, str* body, str* correlation_
 
 		from_su.sin.sin_port = port;
 	} else {
-		from_su.sin.sin_addr.s_addr = REST_INADDR_LOOPBACK;
+		from_su.sin.sin_addr.s_addr = TRACE_INADDR_LOOPBACK;
 		from_su.sin.sin_port = 0;
 	}
 
@@ -998,7 +995,7 @@ static int trace_rest_message(str* host, str* dest, str* body, str* correlation_
 
 		to_su.sin.sin_port = port;
 	} else {
-		to_su.sin.sin_addr.s_addr = REST_INADDR_LOOPBACK;
+		to_su.sin.sin_addr.s_addr = TRACE_INADDR_LOOPBACK;
 		to_su.sin.sin_port = 0;
 	}
 
