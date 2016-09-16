@@ -119,6 +119,7 @@
 #include "script_cb.h"
 #include "dset.h"
 #include "blacklists.h"
+#include "xlog.h"
 
 #include "pt.h"
 #include "ut.h"
@@ -1195,6 +1196,12 @@ try_again:
 	/* init modules */
 	if (init_modules() != 0) {
 		LM_ERR("error while initializing modules\n");
+		goto error;
+	}
+
+	/* init xlog */
+	if (init_xlog() < 0) {
+		LM_ERR("error while initializing xlog\n");
 		goto error;
 	}
 
