@@ -41,6 +41,7 @@
 #include <string.h>
 
 #include "q_malloc.h"
+#include "common.h"
 #include "../dprint.h"
 #include "../globals.h"
 #include "../statistics.h"
@@ -197,7 +198,7 @@ static inline void qm_insert_free(struct qm_block* qm, struct qm_frag* frag)
 
 
 /* init malloc and return a qm_block*/
-struct qm_block* qm_malloc_init(char* address, unsigned long size)
+struct qm_block* qm_malloc_init(char* address, unsigned long size, char *name)
 {
 	char* start;
 	char* end;
@@ -229,6 +230,7 @@ struct qm_block* qm_malloc_init(char* address, unsigned long size)
 	end=start+size;
 	qm=(struct qm_block*)start;
 	memset(qm, 0, sizeof(struct qm_block));
+	qm->name=name;
 	qm->size=size;
 	qm->used=size-init_overhead;
 	qm->fragments = 0;
@@ -382,13 +384,14 @@ void* qm_malloc(struct qm_block* qm, unsigned long size)
 	unsigned int list_cntr;
 
 	list_cntr = 0;
-	LM_GEN1( memlog, "params (%p, %lu), called from %s: %s(%d)\n",
-		qm, size, file, func, line);
+	LM_GEN1(memlog, "%s_malloc (%lu), called from %s: %s(%d)\n",
+		qm->name, size, file, func, line);
 #endif
 	/*size must be a multiple of 8*/
 	size=ROUNDUP(size);
 	if (size>(qm->size-qm->real_used)) {
-		LM_ERR("Not enough free memory (%lu)\n", qm->size-qm->real_used);
+		LM_ERR(oom_errorf, qm->name, qm->size - qm->real_used,
+				qm->name[0] == 'p' ? "M" : "m");
 		pkg_threshold_check();
 		return 0;
 	}
@@ -423,16 +426,17 @@ void* qm_malloc(struct qm_block* qm, unsigned long size)
 		f->check=ST_CHECK_PATTERN;
 		/*  FRAG_END(f)->check1=END_CHECK_PATTERN1;
 			FRAG_END(f)->check2=END_CHECK_PATTERN2;*/
-		LM_GEN1( memlog, "params (%p, %lu), returns address %p frag. %p "
+		LM_GEN1(memlog, "%s_malloc(%lu), returns address %p frag. %p "
 			"(size=%lu) on %d -th hit\n",
-			 qm, size, (char*)f+sizeof(struct qm_frag), f, f->size, list_cntr );
+			 qm->name, size, (char*)f+sizeof(struct qm_frag), f, f->size, list_cntr );
 #endif
 		pkg_threshold_check();
 		qm->fragments += 1;
 		return (char*)f+sizeof(struct qm_frag);
 	}
 
-	LM_ERR("Not enough free memory (%lu)\n", qm->size-qm->real_used);
+	LM_ERR(oom_errorf, qm->name, qm->size - qm->real_used,
+			qm->name[0] == 'p' ? "M" : "m");
 	pkg_threshold_check();
 	return 0;
 }
@@ -452,8 +456,8 @@ void qm_free(struct qm_block* qm, void* p)
 	unsigned long size;
 
 #ifdef DBG_MALLOC
-	LM_GEN1( memlog, "params(%p, %p), called from %s: %s(%d)\n",
-		qm, p, file, func, line);
+	LM_GEN1(memlog, "%s_free(%p), called from %s: %s(%d)\n",
+	        qm->name, p, file, func, line);
 #endif
 	if (p==0) {
 		LM_WARN("free(0) called\n");
@@ -542,8 +546,10 @@ void* qm_realloc(struct qm_block* qm, void* p, unsigned long size)
 
 
 #ifdef DBG_MALLOC
-	LM_GEN1( memlog, "params (%p, %p, %lu), called from %s: %s(%d)\n",
-		qm, p, size, file, func, line);
+	LM_GEN1(memlog, "%s_realloc(%p, %lu->%lu), called from %s: %s(%d)\n",
+			qm->name, p,
+			p ? ((struct qm_frag*)((char *)p - sizeof(struct qm_frag)))->size:0,
+			size, file, func, line);
 	if ((p)&&(p>(void*)qm->last_frag_end || p<(void*)qm->first_frag)){
 		LM_CRIT("bad pointer %p (out of memory block!) - aborting\n", p);
 		abort();
@@ -682,6 +688,7 @@ void qm_status(struct qm_block* qm)
 		if (!f->u.is_free)
 			if (dbg_ht_update(allocd, f->file, f->func, f->line, f->size) < 0) {
 				LM_ERR("Unable to update alloc'ed. memory summary\n");
+				dbg_ht_free(allocd);
 				return;
 			}
 

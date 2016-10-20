@@ -62,9 +62,10 @@
 #define PV_NAME_INTSTR	0
 #define PV_NAME_PVAR	1
 
-#define PV_IDX_INT	3
-#define PV_IDX_PVAR	1
-#define PV_IDX_ALL	2
+#define PV_IDX_PVAR    1
+#define PV_IDX_ALL     2
+#define PV_IDX_INT     3
+#define PV_IDX_APPEND  4
 
 /*! if PV name is dynamic, integer, or str */
 #define pv_has_dname(pv) ((pv)->pvp.pvn.type==PV_NAME_PVAR)
@@ -108,7 +109,8 @@ enum _pv_type {
 	PVT_HDRCNT,           PVT_AUTH_NONCE_COUNT,  PVT_AUTH_QOP,
 	PVT_AUTH_ALGORITHM,   PVT_AUTH_OPAQUE,       PVT_AUTH_CNONCE,
 	PVT_RU_Q,             PVT_ROUTE_PARAM,       PVT_ROUTE_TYPE,
-	PVT_LINE_NUMBER,      PVT_CFG_FILE_NAME,
+	PVT_LINE_NUMBER,      PVT_CFG_FILE_NAME,     PVT_LOG_LEVEL,
+	PVT_XLOG_LEVEL,
 	/* registered by json module */
 	PVT_JSON,
 
@@ -213,7 +215,11 @@ int pv_get_spec_value(struct sip_msg* msg, pv_spec_p sp, pv_value_t *value);
 int pv_print_spec(struct sip_msg* msg, pv_spec_p sp, char *buf, int *len);
 int pv_printf(struct sip_msg* msg, pv_elem_p list, char *buf, int *len);
 int pv_elem_free_all(pv_elem_p log);
+
+/* always obtain a printable version of the given (pv_value_t *) */
+str pv_value_print(pv_value_t *val);
 void pv_value_destroy(pv_value_t *val);
+
 void pv_spec_free(pv_spec_t *spec);
 int pv_spec_dbg(pv_spec_p sp);
 int pv_get_spec_index(struct sip_msg* msg, pv_param_p ip, int *idx, int *flags);

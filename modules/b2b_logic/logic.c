@@ -2430,7 +2430,7 @@ entity_search_done:
 			value_content = (char*)xmlNodeGetContent(value_node);
 			if(value_content == NULL)
 			{
-				LM_ERR("Bad formated scenario document. URI value empty\n");
+				LM_ERR("Bad formatted scenario document. URI value empty\n");
 				goto error;
 			}
 			if(b2b_scenario_parse_uri(value_node, value_content, tuple, msg,
@@ -2453,7 +2453,7 @@ entity_search_done:
 				fdname_content = (char*)xmlNodeGetContent(value_node);
 				if(fdname_content == NULL)
 				{
-					LM_ERR("Bad formated scenario document. URI value empty\n");
+					LM_ERR("Bad formatted scenario document. URI value empty\n");
 					xmlFree(value_content);
 					goto error;
 				}
@@ -2751,7 +2751,6 @@ str* create_top_hiding_entities(struct sip_msg* msg, b2bl_cback_f cbf,
 		goto error;
 	}
 	/* create new client */
-
 	memset(&ci, 0, sizeof(client_info_t));
 	ci.method        = msg->first_line.u.request.method;
 	ci.req_uri       = *(GET_RURI(msg));
@@ -3038,8 +3037,8 @@ int udh_to_uri(str user, str host, str port, str* uri)
 		return -1;
 	}
 
-	uri->len = sprintf(uri->s, "sip:%.*s@%.*s", user.len, user.s,
-			host.len, host.s);
+	uri->len = sprintf(uri->s, "sip:%.*s%.*s%.*s", user.len, user.s,
+			user.len?1:0,"@",host.len, host.s);
 	if(port.s)
 	{
 		uri->len += sprintf(uri->s+uri->len, ":%.*s", port.len, port.s);
@@ -3205,7 +3204,7 @@ str* b2b_process_scenario_init(b2b_scenario_t* scenario_struct,
 		entity_sid.s = (char*)xmlNodeGetNodeContentByName(node, "id", NULL);
 		if(entity_sid.s == NULL)
 		{
-			LM_ERR("Wrong formated xml document. Client node without "
+			LM_ERR("Wrong formatted xml document. Client node without "
 				"id parameter\n");
 			goto error;
 		}
@@ -3238,7 +3237,7 @@ str* b2b_process_scenario_init(b2b_scenario_t* scenario_struct,
 		value_content = (char*)xmlNodeGetContent(node_aux);
 		if(value_content == NULL)
 		{
-			LM_ERR("Bad formated scenario document. URI value empty\n");
+			LM_ERR("Bad formatted scenario document. URI value empty\n");
 			goto error2;
 		}
 

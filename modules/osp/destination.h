@@ -36,19 +36,24 @@
 #include "osp_mod.h"
 
 typedef struct _osp_inbound {
-    char ingress[OSP_STRBUF_SIZE];
+    char ingressaddr[OSP_STRBUF_SIZE];
     char srcdev[OSP_STRBUF_SIZE];
     char source[OSP_STRBUF_SIZE];
     char snid[OSP_STRBUF_SIZE];
+    char swid[OSP_STRBUF_SIZE];
     char calling[OSP_STRBUF_SIZE];
     char called[OSP_STRBUF_SIZE];
-    char display[OSP_STRBUF_SIZE];
-    char rpid[OSP_STRBUF_SIZE];
-    char pai[OSP_STRBUF_SIZE];
+    char fromdisplay[OSP_STRBUF_SIZE];
+    char fromuri[OSP_STRBUF_SIZE];
+    char touri[OSP_STRBUF_SIZE];
+    char paiuser[OSP_STRBUF_SIZE];
+    char rpiduser[OSP_STRBUF_SIZE];
+    char pciuser[OSP_STRBUF_SIZE];
     char divuser[OSP_STRBUF_SIZE];
     char divhost[OSP_STRBUF_SIZE];
-    char pci[OSP_STRBUF_SIZE];
+    char pcvicid[OSP_STRBUF_SIZE];
     char srcmedia[OSP_STRBUF_SIZE];
+    time_t date;
     time_t authtime;
 } osp_inbound;
 
@@ -68,6 +73,7 @@ typedef struct _osp_dest {
     char host[OSP_STRBUF_SIZE];
     char destdev[OSP_STRBUF_SIZE];
     char dnid[OSP_STRBUF_SIZE];
+    char swid[OSP_STRBUF_SIZE];
     char nprn[OSP_STRBUF_SIZE];
     char npcic[OSP_STRBUF_SIZE];
     int npdi;

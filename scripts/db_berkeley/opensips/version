@@ -11,7 +11,7 @@ NIL|0
 acc|
 acc|7
 active_watchers|
-active_watchers|10
+active_watchers|11
 address|
 address|5
 aliases|
@@ -19,7 +19,7 @@ aliases|1009
 b2b_entities|
 b2b_entities|1
 b2b_logic|
-b2b_logic|2
+b2b_logic|3
 b2b_sca|
 b2b_sca|1
 cachedb|
@@ -83,7 +83,7 @@ imc_rooms|2
 load_balancer|
 load_balancer|2
 location|
-location|1010
+location|1011
 missed_calls|
 missed_calls|5
 presentity|
@@ -105,7 +105,7 @@ rtpproxy_sockets|0
 silo|
 silo|6
 sip_trace|
-sip_trace|4
+sip_trace|5
 speed_dial|
 speed_dial|3
 subscriber|

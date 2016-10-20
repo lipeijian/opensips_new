@@ -531,12 +531,16 @@ static inline int str2sint(str* _s, int* _r)
 	if(_s->s[i]=='-') {
 		s=-1;
 		i++;
+	} else if (_s->s[i]=='+') {
+		i++;
 	}
 	for(; i < _s->len; i++) {
 		if ((_s->s[i] >= '0') && (_s->s[i] <= '9')) {
 			*_r *= 10;
 			*_r += _s->s[i] - '0';
 		} else {
+			//Preserve sign for partially converted strings
+			*_r *= s;
 			return -1;
 		}
 	}
@@ -572,6 +576,24 @@ static inline int shm_str_dup(str* dst, const str* src)
 
 	memcpy(dst->s, src->s, src->len);
 	dst->len = src->len;
+	return 0;
+}
+
+/*
+ * Make a copy of an str structure using shm_malloc
+ *	  + an additional '\0' byte, so you can make use of dst->s
+ */
+static inline int shm_nt_str_dup(str* dst, const str* src)
+{
+	dst->s = shm_malloc(src->len + 1);
+	if (!dst->s) {
+		LM_ERR("no shared memory left\n");
+		return -1;
+	}
+
+	memcpy(dst->s, src->s, src->len);
+	dst->len = src->len;
+	dst->s[dst->len] = '\0';
 	return 0;
 }
 
@@ -917,6 +939,40 @@ static inline int str_check_token( str * in)
 	}
 	return 1;
 }
+
+
+/*
+ * l_memmem() returns the location of the first occurrence of data
+ * pattern b2 of size len2 in memory block b1 of size len1 or
+ * NULL if none is found. Obtained from NetBSD.
+ */
+static inline void * l_memmem(const void *b1, const void *b2,
+													size_t len1, size_t len2)
+{
+	/* Initialize search pointer */
+	char *sp = (char *) b1;
+
+	/* Initialize pattern pointer */
+	char *pp = (char *) b2;
+
+	/* Initialize end of search address space pointer */
+	char *eos = sp + len1 - len2;
+
+	/* Sanity check */
+	if(!(b1 && b2 && len1 && len2))
+		return NULL;
+
+	while (sp <= eos) {
+		if (*sp == *pp)
+			if (memcmp(sp, pp, len2) == 0)
+				return sp;
+
+		sp++;
+	}
+
+	return NULL;
+}
+
 
 int user2uid(int* uid, int* gid, char* user);
 

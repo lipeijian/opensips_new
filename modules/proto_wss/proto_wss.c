@@ -132,6 +132,8 @@ struct module_exports exports = {
 
 static int proto_wss_init(struct proto_info *pi)
 {
+	pi->id					= PROTO_WSS;
+	pi->name				= "wss";
 	pi->default_port		= wss_port;
 
 	pi->tran.init_listener	= proto_wss_init_listener;
@@ -321,9 +323,9 @@ static int proto_wss_send(struct socket_info* send_sock,
 	if (to){
 		su2ip_addr(&ip, to);
 		port=su_getport(to);
-		n = tcp_conn_get(id, &ip, port, &c, &fd);
+		n = tcp_conn_get(id, &ip, port, PROTO_WSS, &c, &fd);
 	}else if (id){
-		n = tcp_conn_get(id, 0, 0, &c, &fd);
+		n = tcp_conn_get(id, 0, 0, PROTO_NONE, &c, &fd);
 	}else{
 		LM_CRIT("prot_tls_send called with null id & to\n");
 		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
@@ -438,7 +440,6 @@ error:
 static int wss_raw_writev(struct tcp_connection *c, int fd,
 		const struct iovec *iov, int iovcnt, int tout)
 {
-	struct timeval snd;
 	int i, n, ret = 0;
 #ifdef TLS_DONT_WRITE_FRAGMENTS
 	static char *buf = NULL;

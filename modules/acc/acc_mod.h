@@ -39,9 +39,9 @@ extern int early_media;
 extern int failed_transaction_flag;
 extern int detect_direction;
 
-extern int log_level;
-extern int log_flag;
-extern int log_missed_flag;
+extern int acc_log_level;
+extern int acc_log_flag;
+extern int acc_log_missed_flag;
 
 extern int aaa_flag;
 extern int aaa_missed_flag;
@@ -50,13 +50,6 @@ extern aaa_conn *conn;
 extern char* aaa_proto_url;
 
 extern int cdr_flag;
-
-#ifdef DIAM_ACC
-#include "diam_tcp.h"
-extern rd_buf_t *rb;
-extern int diameter_flag;
-extern int diameter_missed_flag;
-#endif
 
 extern int db_flag;
 extern int db_missed_flag;
@@ -85,6 +78,5 @@ extern unsigned short db_table_name_type;
 
 extern int evi_flag;
 extern int evi_missed_flag;
-
 
 #endif

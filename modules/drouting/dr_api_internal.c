@@ -67,6 +67,7 @@ int load_dr (struct dr_binds *drb)
 	drb->create_head = create_dr_head;
 	drb->free_head = free_dr_head;
 	drb->add_rule = add_rule_api;
+	drb->register_drcb = register_dr_cb;
 	return 0;
 }
 
@@ -125,8 +126,8 @@ static void del_tree_api(ptree_t* t)
 				/* if non intermediate delete the routing info */
 				if(t->ptnode[i].rg[j].rtlw !=NULL)
 					del_rt_list_api(t->ptnode[i].rg[j].rtlw);
-			shm_free(t->ptnode[i].rg);
 			}
+			shm_free(t->ptnode[i].rg);
 		}
 		/* if non leaf delete all the children */
 		if(t->ptnode[i].next != NULL)

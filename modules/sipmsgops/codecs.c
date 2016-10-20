@@ -84,7 +84,8 @@ static int create_codec_lumps(struct sip_msg * msg)
 
 	/* get the number of streams */
 	lumps_len = 0;
-	cur_session = msg->sdp->sessions;
+	//FIXME
+	cur_session = NULL;//msg->sdp->sessions;
 
 	while(cur_session)
 	{
@@ -106,7 +107,8 @@ static int create_codec_lumps(struct sip_msg * msg)
 	LM_DBG("creating %d streams\n",lumps_len);
 
 	count = 0;
-	cur_session = msg->sdp->sessions;
+	//FIXME
+	cur_session = NULL;//msg->sdp->sessions;
 
 	while(cur_session)
 	{
@@ -330,8 +332,9 @@ static int do_for_all_streams(struct sip_msg* msg, str* str1,str * str2,
 		return -1;
 	}
 
-	cur_session = msg->sdp->sessions;
-	rez = 0;
+	//FIXME
+	cur_session = NULL;//msg->sdp->sessions;
+	rez = -1;
 
 	while(cur_session)
 	{
@@ -339,7 +342,8 @@ static int do_for_all_streams(struct sip_msg* msg, str* str1,str * str2,
 
 		while(cur_cell)
 		{
-			rez |= stream_process(msg,cur_cell,str1,str2,re,op,desc);
+			if(stream_process(msg,cur_cell,str1,str2,re,op,desc)==1)
+				rez = 1;
 			cur_cell = cur_cell->next;
 		}
 
@@ -347,8 +351,6 @@ static int do_for_all_streams(struct sip_msg* msg, str* str1,str * str2,
 
 	}
 
-	if( rez <0 )
-		rez = 0;
 	return rez;
 }
 
@@ -685,18 +687,15 @@ int codec_find (struct sip_msg* msg, char* str1 )
 
 	LM_DBG("searching for codec <%.*s> \n",res.len,res.s);
 
-	if( do_for_all_streams( msg, &res, NULL, NULL,
-		FIND, DESC_NAME) == 0)
-		return -1;
-
-	return 1;
-
+	return do_for_all_streams( msg, &res, NULL, NULL,
+		FIND, DESC_NAME);
 }
 
 int codec_find_re (struct sip_msg* msg, char* str1 )
 {
 	regex_t *re;
 	int do_free;
+	int ret;
 
 	re = fixup_get_regex(msg,(gparam_p)str1,&do_free);
 	if (!re) {
@@ -704,16 +703,12 @@ int codec_find_re (struct sip_msg* msg, char* str1 )
 		return -1;
 	}
 
-	if( do_for_all_streams(msg, NULL, NULL, re,
-		FIND, DESC_REGEXP) == 0) {
-		if (do_free)
-			fixup_free_regexp((void **)&re);
-		return -1;
-	}
-	
+	ret = do_for_all_streams(msg, NULL, NULL, re,
+		FIND, DESC_REGEXP);
+
 	if (do_free)
 		fixup_free_regexp((void **)&re);
-	return 1;
+	return ret;
 }
 
 
@@ -736,11 +731,8 @@ int codec_find_clock (struct sip_msg* msg, char* str1,char * str2 )
 	LM_DBG("searching for codec <%.*s> with clock <%.*s> \n",
 		codec.len,codec.s,clock.len,clock.s);
 
-	if( do_for_all_streams( msg, &codec, &clock, NULL,
-		FIND, DESC_NAME_AND_CLOCK) == 0)
-		return -1;
-
-	return 1;
+	return do_for_all_streams( msg, &codec, &clock, NULL,
+		FIND, DESC_NAME_AND_CLOCK);
 }
 
 
@@ -756,10 +748,8 @@ int codec_delete (struct sip_msg* msg, char* str1 )
 
 	LM_DBG("deleting codec <%.*s> \n",res.len,res.s);
 
-	if( do_for_all_streams( msg, &res, NULL, NULL,
-		DELETE, DESC_NAME) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &res, NULL, NULL,
+		DELETE, DESC_NAME);
 }
 
 
@@ -767,6 +757,7 @@ int codec_delete_re (struct sip_msg* msg, char* str1 )
 {
 	regex_t *re;
 	int do_free;
+	int ret;
 
 	re = fixup_get_regex(msg,(gparam_p)str1,&do_free);
 	if (!re) {
@@ -774,16 +765,12 @@ int codec_delete_re (struct sip_msg* msg, char* str1 )
 		return -1;
 	}
 
-	if( do_for_all_streams( msg, NULL, NULL, re,
-		DELETE, DESC_REGEXP) == 0) {
-		if (do_free)
-			fixup_free_regexp((void **)&re);
-		return -1;
-	}
+	ret = do_for_all_streams( msg, NULL, NULL, re,
+		DELETE, DESC_REGEXP);
 
 	if (do_free)
 		fixup_free_regexp((void **)&re);
-	return 1;
+	return ret;
 }
 
 
@@ -791,6 +778,7 @@ int codec_delete_except_re (struct sip_msg* msg, char* str1 )
 {
 	regex_t *re;
 	int do_free;
+	int ret;
 
 	re = fixup_get_regex(msg,(gparam_p)str1,&do_free);
 	if (!re) {
@@ -798,16 +786,12 @@ int codec_delete_except_re (struct sip_msg* msg, char* str1 )
 		return -1;
 	}
 
-	if( do_for_all_streams( msg, NULL, NULL, re,
-		DELETE, DESC_REGEXP_COMPLEMENT) == 0) {
-		if (do_free)
-			fixup_free_regexp((void **)&re);
-		return -1;
-	}
+	ret = do_for_all_streams( msg, NULL, NULL, re,
+		DELETE, DESC_REGEXP_COMPLEMENT);
 
 	if (do_free)
 		fixup_free_regexp((void **)&re);
-	return 1;
+	return ret;
 }
 
 
@@ -830,10 +814,8 @@ int codec_delete_clock (struct sip_msg* msg, char* str1 ,char * str2)
 	LM_DBG("deleting codec <%.*s> with clock <%.*s> \n",
 		codec.len,codec.s,clock.len,clock.s);
 
-	if( do_for_all_streams( msg, &codec, &clock, NULL,
-		DELETE, DESC_NAME_AND_CLOCK) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &codec, &clock, NULL,
+		DELETE, DESC_NAME_AND_CLOCK);
 }
 
 
@@ -849,10 +831,8 @@ int codec_move_up (struct sip_msg* msg, char* str1)
 
 	LM_DBG("moving up codec <%.*s> \n",res.len,res.s);
 
-	if( do_for_all_streams( msg, &res, NULL, NULL,
-		ADD_TO_FRONT, DESC_NAME) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &res, NULL, NULL,
+		ADD_TO_FRONT, DESC_NAME);
 }
 
 
@@ -860,6 +840,7 @@ int codec_move_up_re (struct sip_msg* msg, char* str1)
 {
 	regex_t *re;
 	int do_free;
+	int ret;
 
 	re = fixup_get_regex(msg,(gparam_p)str1,&do_free);
 	if (!re) {
@@ -867,16 +848,12 @@ int codec_move_up_re (struct sip_msg* msg, char* str1)
 		return -1;
 	}
 
-	if( do_for_all_streams( msg, NULL, NULL, re,
-		ADD_TO_FRONT, DESC_REGEXP) == 0) {
-		if (do_free)
-			fixup_free_regexp((void **)&re);
-		return -1;
-	}
+	ret = do_for_all_streams( msg, NULL, NULL, re,
+		ADD_TO_FRONT, DESC_REGEXP);
 
 	if (do_free)
 		fixup_free_regexp((void **)&re);
-	return 1;
+	return ret;
 }
 
 
@@ -899,10 +876,8 @@ int codec_move_up_clock (struct sip_msg* msg, char* str1 ,char * str2)
 	LM_DBG("moving up codec <%.*s> with clock <%.*s> \n",
 		codec.len,codec.s,clock.len,clock.s);
 
-	if( do_for_all_streams( msg, &codec, &clock, NULL,
-		ADD_TO_FRONT, DESC_NAME_AND_CLOCK) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &codec, &clock, NULL,
+		ADD_TO_FRONT, DESC_NAME_AND_CLOCK);
 }
 
 
@@ -918,10 +893,8 @@ int codec_move_down (struct sip_msg* msg, char* str1)
 
 	LM_DBG("moving down codec <%.*s> \n",res.len,res.s);
 
-	if( do_for_all_streams( msg, &res, NULL, NULL,
-		ADD_TO_BACK, DESC_NAME) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &res, NULL, NULL,
+		ADD_TO_BACK, DESC_NAME);
 }
 
 
@@ -929,6 +902,7 @@ int codec_move_down_re (struct sip_msg* msg, char* str1)
 {
 	regex_t *re;
 	int do_free;
+	int ret;
 
 	re = fixup_get_regex(msg,(gparam_p)str1,&do_free);
 	if (!re) {
@@ -936,16 +910,12 @@ int codec_move_down_re (struct sip_msg* msg, char* str1)
 		return -1;
 	}
 
-	if( do_for_all_streams( msg, NULL, NULL, re,
-		ADD_TO_BACK, DESC_REGEXP) == 0) {
-		if (do_free)
-			fixup_free_regexp((void **)&re);
-		return -1;
-	}
+	ret = do_for_all_streams( msg, NULL, NULL, re,
+		ADD_TO_BACK, DESC_REGEXP);
 
 	if (do_free)
 		fixup_free_regexp((void **)&re);
-	return 1;
+	return ret;
 }
 
 
@@ -968,10 +938,8 @@ int codec_move_down_clock (struct sip_msg* msg, char* str1 ,char * str2)
 	LM_DBG("moving down codec <%.*s> with clock <%.*s> \n",
 		codec.len,codec.s,clock.len,clock.s);
 
-	if( do_for_all_streams( msg, &codec, &clock, NULL,
-		ADD_TO_BACK, DESC_NAME_AND_CLOCK) == 0)
-		return -1;
-	return 1;
+	return do_for_all_streams( msg, &codec, &clock, NULL,
+		ADD_TO_BACK, DESC_NAME_AND_CLOCK);
 }
 
 
@@ -998,7 +966,9 @@ static int handle_streams(struct sip_msg* msg, regex_t* re, int delete)
 
 	/* search for the stream */
 	match = 0;
-	for(session=msg->sdp->sessions; session && !match ;session=session->next){
+	//FIXME
+	//for(session=msg->sdp->sessions; session && !match ;session=session->next){
+	for(session=NULL; session && !match ;session=session->next){
 		prev_stream = NULL;
 		for( stream=session->streams ; stream ;
 		prev_stream=stream,stream=stream->next){

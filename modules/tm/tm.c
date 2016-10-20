@@ -273,6 +273,8 @@ static param_export_t params[]={
 		&minor_branch_flag },
 	{ "timer_partitions",         INT_PARAM,
 		&timer_partitions },
+	{ "auto_100trying",           INT_PARAM,
+		&auto_100trying },
 	{0,0,0}
 };
 
@@ -847,7 +849,7 @@ static int mod_init(void)
 		return -1;
 	}
 
-	if ( register_async_handlers( t_handle_async, t_resume_async )<0 ) {
+	if ( register_async_script_handlers( t_handle_async, t_resume_async )<0 ) {
 		LM_ERR("failed to register async handler to core \n");
 		return -1;
 	}

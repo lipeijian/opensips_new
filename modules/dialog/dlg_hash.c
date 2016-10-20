@@ -223,7 +223,7 @@ void destroy_dlg(struct dlg_cell *dlg)
 {
 	int ret = 0;
 
-	LM_DBG("destroing dialog %p\n",dlg);
+	LM_DBG("destroying dialog %p\n",dlg);
 
 	ret = remove_dlg_timer(&dlg->tl);
 	if (ret < 0) {
@@ -242,7 +242,7 @@ void destroy_dlg(struct dlg_cell *dlg)
 			dlg_leg_print_info( dlg, callee_idx(dlg), tag));
 	}
 
-	run_dlg_callbacks( DLGCB_DESTROY , dlg, 0, DLG_DIR_NONE, 0);
+	run_dlg_callbacks( DLGCB_DESTROY , dlg, 0, DLG_DIR_NONE, NULL, 0);
 
 	free_dlg_dlg(dlg);
 }
@@ -320,12 +320,6 @@ struct dlg_cell* build_new_dlg( str *callid, str *from_uri, str *to_uri,
 	dlg->to_uri.len = to_uri->len;
 	memcpy( p, to_uri->s, to_uri->len);
 	p += to_uri->len;
-
-	if ( p!=(((char*)dlg)+len) ) {
-		LM_CRIT("buffer overflow\n");
-		shm_free(dlg);
-		return 0;
-	}
 
 	return dlg;
 }
@@ -881,8 +875,8 @@ static void raise_state_changed_event(unsigned int h_entry, unsigned int h_id,
  * \see next_state_dlg
  */
 static inline void log_next_state_dlg(const int event,
-												const struct dlg_cell *dlg) {
-	LM_CRIT("bogus event %d in state %d for dlg %p [%u:%u] with "
+                                      const struct dlg_cell *dlg) {
+	LM_WARN("bogus event %d in state %d for dlg %p [%u:%u] with "
 		"clid '%.*s' and tags '%.*s' '%.*s'\n",
 		event, dlg->state, dlg, dlg->h_entry, dlg->h_id,
 		dlg->callid.len, dlg->callid.s,
@@ -1076,8 +1070,8 @@ static inline int internal_mi_print_dlg(struct mi_node *rpl,
 	if (node==0)
 		goto error;
 
-	attr = addf_mi_attr( node, 0, "hash", 4, "%u:%u",
-			dlg->h_entry, dlg->h_id );
+	attr = addf_mi_attr( node, 0, "ID", 2, "%llu",
+			(((long long unsigned)dlg->h_entry)<<(8*sizeof(int)))+dlg->h_id );
 	if (attr==0)
 		goto error;
 
@@ -1281,7 +1275,7 @@ static inline int internal_mi_print_dlg(struct mi_node *rpl,
 		}
 		/* print external context info */
 		run_dlg_callbacks( DLGCB_MI_CONTEXT, dlg, NULL,
-			DLG_DIR_NONE, (void *)node1);
+			DLG_DIR_NONE, (void *)node1, 0);
 	}
 
 	return 0;

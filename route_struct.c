@@ -445,9 +445,6 @@ void print_action(struct action* t)
 		case LEN_GT_T:
 				LM_GEN1(L_DBG, "len_gt(");
 				break;
-		case SET_DEBUG_T:
-				LM_GEN1(L_DBG, "setdebug(");
-				break;
 		case SETFLAG_T:
 				LM_GEN1(L_DBG, "setflag(");
 				break;
@@ -465,15 +462,6 @@ void print_action(struct action* t)
 				break;
 		case ISBFLAGSET_T:
 				LM_GEN1(L_DBG, "isbflagset(");
-				break;
-		case SETSFLAG_T:
-				LM_GEN1(L_DBG, "setsflag(");
-				break;
-		case RESETSFLAG_T:
-				LM_GEN1(L_DBG, "resetsflag(");
-				break;
-		case ISSFLAGSET_T:
-				LM_GEN1(L_DBG, "issflagset(");
 				break;
 		case SET_HOST_T:
 				LM_GEN1(L_DBG, "sethost(");

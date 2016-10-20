@@ -40,7 +40,7 @@
  */
 int db_sqlite_convert_row(const db_con_t* _h, db_res_t* _res, db_row_t* _r)
 {
-	int col;
+	int col,len;
 	db_val_t* _v;
 	const char* db_value;
 
@@ -102,21 +102,30 @@ int db_sqlite_convert_row(const db_con_t* _h, db_res_t* _res, db_row_t* _r)
 				db_value = sqlite3_column_blob(CON_SQLITE_PS(_h), col);
 
 				VAL_BLOB(_v).s = pkg_malloc(VAL_BLOB(_v).len+1);
+				if (VAL_BLOB(_v).s == NULL) {
+					LM_ERR("no more pkg mem!\n");
+					return -1;
+				}
 				memcpy(VAL_BLOB(_v).s, db_value, VAL_BLOB(_v).len);
 
 				VAL_BLOB(_v).s[VAL_BLOB(_v).len]='\0';
 				VAL_TYPE(_v) = DB_BLOB;
+				VAL_FREE(_v) = 1;
 
 				break;
 			case DB_STRING:
-				VAL_STR(_v).len = sqlite3_column_bytes(CON_SQLITE_PS(_h), col);
+				len = sqlite3_column_bytes(CON_SQLITE_PS(_h), col);
 				db_value = (char *)sqlite3_column_text(CON_SQLITE_PS(_h), col);
 
-				VAL_STR(_v).s = pkg_malloc(VAL_STR(_v).len+1);
-				memcpy(VAL_STR(_v).s, db_value, VAL_STR(_v).len);
+				if ((VAL_STRING(_v) = pkg_malloc(len+1)) == NULL) {
+					LM_ERR("no more pkg mem!\n");
+					return -1;
+				}
+				memcpy((char*)VAL_STRING(_v), db_value, len+1);
 
-				VAL_STR(_v).s[VAL_STR(_v).len]='\0';
-				VAL_TYPE(_v) = DB_STR;
+				VAL_TYPE(_v) = DB_STRING;
+				VAL_FREE(_v) = 1;
+
 				break;
 			default:
 				LM_ERR("invalid type for sqlite!\n");

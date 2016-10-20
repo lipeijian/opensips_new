@@ -94,15 +94,14 @@ int unix_tcp_sock = -1;
 /*!< current number of open connections */
 static int tcp_connections_no = 0;
 
-/*!< by default accept aliases */
-int tcp_accept_aliases=1;
+/*!< by default don't accept aliases */
+int tcp_accept_aliases=0;
 int tcp_connect_timeout=DEFAULT_TCP_CONNECT_TIMEOUT;
 int tcp_con_lifetime=DEFAULT_TCP_CONNECTION_LIFETIME;
 int tcp_listen_backlog=DEFAULT_TCP_LISTEN_BACKLOG;
 /*!< by default choose the best method */
 enum poll_types tcp_poll_method=0;
 int tcp_max_connections=DEFAULT_TCP_MAX_CONNECTIONS;
-int tcp_max_fd_no=0;
 /* number of TCP workers */
 int tcp_children_no = CHILD_NO;
 /* Max number of seconds that we except a full SIP message
@@ -211,7 +210,7 @@ int tcp_init_sock_opt(int s)
 	/* non-blocking */
 	flags=fcntl(s, F_GETFL);
 	if (flags==-1){
-		LM_ERR("fnctl failed: (%d) %s\n", errno, strerror(errno));
+		LM_ERR("fcntl failed: (%d) %s\n", errno, strerror(errno));
 		goto error;
 	}
 	if (fcntl(s, F_SETFL, flags|O_NONBLOCK)==-1){
@@ -356,9 +355,9 @@ static int send2child(struct tcp_connection* tcpconn,int rw)
 
 	tcp_children[idx].busy++;
 	tcp_children[idx].n_reqs++;
-	if (min_busy){
-		LM_INFO("no free tcp receiver, connection passed to the least"
-				" busy one (%d)\n", min_busy);
+	if (min_busy) {
+		LM_DBG("no free tcp receiver, connection passed to the least "
+		       "busy one (proc #%d, %d con)\n", idx, min_busy);
 	}
 	LM_DBG("to tcp child %d %d(%d), %p rw %d\n", idx,tcp_children[idx].proc_no,
 		tcp_children[idx].pid, tcpconn,rw);
@@ -495,8 +494,8 @@ static struct tcp_connection* _tcpconn_find(int id)
 }
 
 
-/*! \brief _tcpconn_find with locks and aquire fd */
-int tcp_conn_get(int id, struct ip_addr* ip, int port,
+/*! \brief _tcpconn_find with locks and acquire fd */
+int tcp_conn_get(int id, struct ip_addr* ip, int port, enum sip_protos proto,
 									struct tcp_connection** conn, int* conn_fd)
 {
 	struct tcp_connection* c;
@@ -516,7 +515,7 @@ int tcp_conn_get(int id, struct ip_addr* ip, int port,
 		TCPCONN_UNLOCK(part);
 	}
 
-	/* continue search based on IP + port */
+	/* continue search based on IP address + port + transport */
 #ifdef EXTRA_DEBUG
 	LM_DBG("%d  port %d\n",id, port);
 	if (ip) print_ip("tcpconn_find: ip ", ip, "\n");
@@ -533,8 +532,10 @@ int tcp_conn_get(int id, struct ip_addr* ip, int port,
 				print_ip("ip=",&a->parent->rcv.src_ip,"\n");
 #endif
 				c = a->parent;
-				if ( (c->state!=S_CONN_BAD) && (port==a->port) &&
-				(ip_addr_cmp(ip, &c->rcv.src_ip)) )
+				if (c->state != S_CONN_BAD &&
+				    port == a->port &&
+				    proto == c->type &&
+				    ip_addr_cmp(ip, &c->rcv.src_ip))
 					goto found;
 			}
 			TCPCONN_UNLOCK(part);
@@ -553,7 +554,7 @@ found:
 	LM_DBG("con found in state %d\n",c->state);
 
 	if (c->state!=S_CONN_OK || conn_fd==NULL) {
-		/* no need to aquired, just return the conn with an invalid fd */
+		/* no need to acquired, just return the conn with an invalid fd */
 		*conn = c;
 		if (conn_fd) *conn_fd = -1;
 		return 1;
@@ -567,7 +568,7 @@ found:
 		return 1;
 	}
 
-	/* aquire the fd for this connection too */
+	/* acquire the fd for this connection too */
 	LM_DBG("tcp connection found (%p), acquiring fd\n", c);
 	/* get the fd */
 	response[0]=(long)c;
@@ -731,9 +732,11 @@ int tcpconn_add_alias(int id, int port, int proto)
 	if (c){
 		hash=tcp_addr_hash(&c->rcv.src_ip, port);
 		/* search the aliases for an already existing one */
-		for (a=TCP_PART(id).tcpconn_aliases_hash[hash]; a; a=a->next){
-			if ( (a->parent->state!=S_CONN_BAD) && (port==a->port) &&
-					(ip_addr_cmp(&c->rcv.src_ip, &a->parent->rcv.src_ip)) ){
+		for (a=TCP_PART(id).tcpconn_aliases_hash[hash]; a; a=a->next) {
+			if (a->parent->state != S_CONN_BAD &&
+			    port == a->port &&
+			    proto == a->parent->type &&
+			    ip_addr_cmp(&c->rcv.src_ip, &a->parent->rcv.src_ip)) {
 				/* found */
 				if (a->parent!=c) goto error_sec;
 				else goto ok;
@@ -795,14 +798,14 @@ static struct tcp_connection* tcpconn_new(int sock, union sockaddr_union* su,
 	c=(struct tcp_connection*)shm_malloc(sizeof(struct tcp_connection));
 	if (c==0){
 		LM_ERR("shared memory allocation failure\n");
-		goto error;
+		return 0;
 	}
 	memset(c, 0, sizeof(struct tcp_connection)); /* zero init */
 	c->s=sock;
 	c->fd=-1; /* not initialized */
 	if (lock_init(&c->write_lock)==0){
 		LM_ERR("init lock failed\n");
-		goto error;
+		goto error0;
 	}
 
 	c->rcv.src_su=*su;
@@ -830,17 +833,16 @@ static struct tcp_connection* tcpconn_new(int sock, union sockaddr_union* su,
 	protos[si->proto].net.conn_init(c)<0) {
 		LM_ERR("failed to do proto %d specific init for conn %p\n",
 			si->proto,c);
-		goto error;
+		goto error1;
 	}
 
 	tcp_connections_no++;
 	return c;
 
-error:
-	if (c) {
-		lock_destroy(&c->write_lock);
-		shm_free(c);
-	}
+error1:
+	lock_destroy(&c->write_lock);
+error0:
+	shm_free(c);
 	return 0;
 }
 
@@ -1395,7 +1397,7 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 			LM_CRIT("empty fd map\n");
 			goto error;
 		default:
-			LM_CRIT("uknown fd type %d\n", fm->type);
+			LM_CRIT("unknown fd type %d\n", fm->type);
 			goto error;
 	}
 	return ret;
@@ -1474,7 +1476,7 @@ static void tcp_main_server(void)
 
 	/* we run in a separate, dedicated process, with its own reactor
 	 * (reactors are per process) */
-	if (init_worker_reactor("TCP_main", tcp_max_fd_no, RCT_PRIO_MAX)<0)
+	if (init_worker_reactor("TCP_main", RCT_PRIO_MAX)<0)
 		goto error;
 
 	/* now start watching all the fds*/
@@ -1510,7 +1512,7 @@ static void tcp_main_server(void)
 			/* make socket non-blocking */
 			flags=fcntl(tcp_children[n].unix_sock, F_GETFL);
 			if (flags==-1){
-				LM_ERR("fnctl failed: (%d) %s\n", errno, strerror(errno));
+				LM_ERR("fcntl failed: (%d) %s\n", errno, strerror(errno));
 				goto error;
 			}
 			if (fcntl(tcp_children[n].unix_sock,F_SETFL,flags|O_NONBLOCK)==-1){
@@ -1703,9 +1705,6 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 		if ( is_tcp_based_proto(n) )
 			for(si=protos[n].listeners; si ; si=si->next,r++ );
 
-	tcp_max_fd_no=counted_processes*2 + r - 1/*timer*/ + 3/*stdin/out/err*/;
-	tcp_max_fd_no+=tcp_max_connections;
-
 	if (register_tcp_load_stat( &load_p )!=0) {
 		LM_ERR("failed to init tcp load statistic\n");
 		goto error;
@@ -1757,9 +1756,9 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 				*startup_done = 1;
 			}
 
-			report_conditional_status( (1), 0);
+			report_conditional_status( 1, 0);
 
-			tcp_worker_proc( reader_fd[1], tcp_max_fd_no);
+			tcp_worker_proc( reader_fd[1] );
 			exit(-1);
 		}
 	}
@@ -1770,6 +1769,19 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 			usleep(5);
 			handle_sigs();
 		}
+
+	return 0;
+error:
+	return -1;
+}
+
+
+int tcp_start_listener(void)
+{
+	pid_t pid;
+
+	if (tcp_disabled)
+		return 0;
 
 	/* start the TCP manager process */
 	if ( (pid=internal_fork( "TCP main"))<0 ) {
@@ -1812,7 +1824,7 @@ struct mi_root *mi_tcp_list_conns(struct mi_root *cmd, void *param)
 	char date_buf[MI_DATE_BUF_LEN];
 	int date_buf_len;
 	unsigned int i,n,part;
-	char proto[4];
+	char proto[PROTO_NAME_MAX_SIZE];
 	char *p;
 	int len;
 

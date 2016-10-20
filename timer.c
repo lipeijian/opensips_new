@@ -33,6 +33,10 @@
  * \brief Timer handling
  */
 
+/* keep this first as it needs to include some glib h file with
+ * special defines enabled (mainly sys/types.h) */
+#include "reactor.h"
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/select.h>
@@ -104,7 +108,7 @@ int init_timer(void)
 	/* make reading fd non-blocking */
 	optval=fcntl(timer_pipe[0], F_GETFL);
 	if (optval==-1){
-		LM_ERR("fnctl failed: (%d) %s\n", errno, strerror(errno));
+		LM_ERR("fcntl failed: (%d) %s\n", errno, strerror(errno));
 		return E_UNSPEC;
 	}
 	if (fcntl(timer_pipe[0],F_SETFL,optval|O_NONBLOCK)==-1){
@@ -112,7 +116,7 @@ int init_timer(void)
 			errno, strerror(errno));
 		return E_UNSPEC;
 	}
-	/* make vizible the "read" part of the pipe */
+	/* make visible the "read" part of the pipe */
 	timer_fd_out = timer_pipe[0];
 
 	return 0;
@@ -212,6 +216,8 @@ void route_timer_f(unsigned int ticks, void* param)
 		req->first_line.u.request.method.len= 5;
 		req->first_line.u.request.uri.s= "sip:user@domain.com";
 		req->first_line.u.request.uri.len= 19;
+		req->rcv.src_ip.af = AF_INET;
+		req->rcv.dst_ip.af = AF_INET;
 	}
 
 	if(a == NULL) {
@@ -276,7 +282,7 @@ utime_t get_uticks(void)
 
 
 
-static inline void timer_ticker(struct os_timer *timer_list, utime_t *drift)
+static inline void timer_ticker(struct os_timer *timer_list)
 {
 	struct os_timer* t;
 	unsigned int j;
@@ -291,7 +297,7 @@ static inline void timer_ticker(struct os_timer *timer_list, utime_t *drift)
 	for (t=timer_list;t; t=t->next){
 		if (j>=t->expires){
 			if (t->trigger_time) {
-				LM_WARN("timer task <%s> already schedualed for %lld ms"
+				LM_WARN("timer task <%s> already scheduled for %lld ms"
 					" (now %lld ms), it may overlap..\n",
 					t->label, (utime_t)(t->trigger_time/1000),
 					((utime_t)*ijiffies/1000) );
@@ -304,7 +310,7 @@ static inline void timer_ticker(struct os_timer *timer_list, utime_t *drift)
 					   until the prev one is done */
 					continue;
 				} else {
-					/* launch the task now, even if overlaping with the
+					/* launch the task now, even if overlapping with the
 					   already running one */
 				}
 			}
@@ -317,7 +323,7 @@ again:
 			if (l==-1) {
 				if (errno==EAGAIN || errno==EINTR || errno==EWOULDBLOCK )
 					goto again;
-				LM_ERR("writing failed:[%d] %s, skipiping job <%s> at %d s\n",
+				LM_ERR("writing failed:[%d] %s, skipping job <%s> at %d s\n",
 					errno, strerror(errno),t->label, j);
 			}
 		}
@@ -326,7 +332,7 @@ again:
 
 
 
-static inline void utimer_ticker(struct os_timer *utimer_list, utime_t *drift)
+static inline void utimer_ticker(struct os_timer *utimer_list)
 {
 	struct os_timer* t;
 	utime_t uj;
@@ -338,7 +344,7 @@ static inline void utimer_ticker(struct os_timer *utimer_list, utime_t *drift)
 	for ( t=utimer_list ; t ; t=t->next){
 		if (uj>=t->expires){
 			if (t->trigger_time) {
-				LM_WARN("utimer task <%s> already schedualed for %lld ms"
+				LM_WARN("utimer task <%s> already scheduled for %lld ms"
 					" (now %lld ms), it may overlap..\n",
 					t->label, (utime_t)(t->trigger_time/1000),
 					((utime_t)*ijiffies/1000) );
@@ -351,7 +357,7 @@ static inline void utimer_ticker(struct os_timer *utimer_list, utime_t *drift)
 					   until the prev one is done */
 					continue;
 				} else {
-					/* launch the task now, even if overlaping with the
+					/* launch the task now, even if overlapping with the
 					   already running one */
 				}
 			}
@@ -364,7 +370,7 @@ again:
 			if (l==-1) {
 				if (errno==EAGAIN || errno==EINTR || errno==EWOULDBLOCK )
 					goto again;
-				LM_ERR("writing failed:[%d] %s, skipiping job <%s> at %lld us\n",
+				LM_ERR("writing failed:[%d] %s, skipping job <%s> at %lld us\n",
 					errno, strerror(errno),t->label, uj);
 			}
 		}
@@ -377,13 +383,14 @@ static void run_timer_process( void )
 	unsigned int multiple;
 	unsigned int cnt;
 	struct timeval o_tv;
-	struct timeval tv;
+	struct timeval tv, comp_tv;
 	utime_t  drift;
 	utime_t  uinterval;
 	utime_t  wait;
+	utime_t  ij;
 
 /* timer re-calibration to compensate drifting */
-#define compute_wait_with_drift(_tv,_type) \
+#define compute_wait_with_drift(_tv) \
 	do {                                                         \
 		if ( drift > ITIMER_TICK ) {                             \
 			wait = (drift >= uinterval) ? 0 : uinterval-drift;   \
@@ -415,44 +422,63 @@ static void run_timer_process( void )
 	if (utimer_list==NULL) {
 		/* only TIMERs, ticking at TIMER_TICK */
 		for( ; ; ) {
-			compute_wait_with_drift( tv, 0);
+			ij = *ijiffies;
+			compute_wait_with_drift(comp_tv);
+			tv = comp_tv;
 			select( 0, 0, 0, 0, &tv);
-			timer_ticker( timer_list, &drift);
+			timer_ticker( timer_list);
+
+			drift += ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec > (*ijiffies-ij)) ?
+					0 : *ijiffies-ij - ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec);
 		}
 
 	} else
 	if (timer_list==NULL) {
 		/* only UTIMERs, ticking at UTIMER_TICK */
 		for( ; ; ) {
-			compute_wait_with_drift( tv, 1);
+			ij = *ijiffies;
+			compute_wait_with_drift(comp_tv);
+			tv = comp_tv;
 			select( 0, 0, 0, 0, &tv);
-			utimer_ticker( utimer_list, &drift);
+			utimer_ticker( utimer_list);
+
+			drift += ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec > (*ijiffies-ij)) ?
+					0 : *ijiffies-ij - ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec);
 		}
 
 	} else
 	if (multiple==1) {
 		/* TIMERs and UTIMERs, ticking together TIMER_TICK (synced) */
 		for( ; ; ) {
-			compute_wait_with_drift( tv, 2);
+			ij = *ijiffies;
+			compute_wait_with_drift(comp_tv);
+			tv = comp_tv;
 			select( 0, 0, 0, 0, &tv);
-			timer_ticker( timer_list, &drift);
-			utimer_ticker( utimer_list, &drift);
+			timer_ticker( timer_list);
+			utimer_ticker( utimer_list);
+
+			drift += ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec > (*ijiffies-ij)) ?
+					0 : *ijiffies-ij - ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec);
 		}
 
 	} else {
 		/* TIMERs and UTIMERs, TIMER_TICK is multiple of UTIMER_TICK */
 		for( cnt=1 ; ; cnt++ ) {
-			compute_wait_with_drift( tv, 3);
+			ij = *ijiffies;
+			compute_wait_with_drift(comp_tv);
+			tv = comp_tv;
 			select( 0, 0, 0, 0, &tv);
-			utimer_ticker(utimer_list, &drift);
+			utimer_ticker(utimer_list);
 			if (cnt==multiple) {
-				timer_ticker(timer_list, &drift);
+				timer_ticker(timer_list);
 				cnt = 0;
 			}
+
+			drift += ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec > (*ijiffies-ij)) ?
+					0 : *ijiffies-ij - ((utime_t)comp_tv.tv_sec*1000000+comp_tv.tv_usec);
 		}
 	}
 }
-
 
 static void run_timer_process_jif(void)
 {
@@ -462,6 +488,9 @@ static void run_timer_process_jif(void)
 	unsigned int ucnt;
 	struct timeval o_tv;
 	struct timeval tv;
+	struct timeval sync_ts, last_ts;
+	stime_t interval, drift;
+	utime_t last_ticks, last_sync = 0;
 
 	o_tv.tv_sec = 0;
 	o_tv.tv_usec = ITIMER_TICK; /* internal timer */
@@ -470,6 +499,9 @@ static void run_timer_process_jif(void)
 
 	LM_DBG("tv = %ld, %ld , m=%d, mu=%d\n",
 		(long)o_tv.tv_sec,(long)o_tv.tv_usec,multiple,umultiple);
+
+	gettimeofday(&last_ts, 0);
+	last_ticks = *ijiffies;
 
 	for( cnt=1,ucnt=1 ; ; ucnt++ ) {
 		tv = o_tv;
@@ -491,6 +523,37 @@ static void run_timer_process_jif(void)
 				*(jiffies)+=TIMER_TICK;
 				/* test for overflow (if tick= 1s =>overflow in 136 years)*/
 				cnt = 0;
+			}
+		}
+
+		/* synchronize with system time if needed */
+		if (*ijiffies - last_sync >= TIMER_SYNC_TICKS) {
+			last_sync = *ijiffies;
+
+			gettimeofday(&sync_ts, 0);
+			interval = (utime_t)sync_ts.tv_sec*1000000 + sync_ts.tv_usec
+						- (utime_t)last_ts.tv_sec*1000000 - last_ts.tv_usec;
+
+			drift = interval - (*ijiffies - last_ticks);
+
+			/* protect against sudden time changes */
+			if (interval < 0 || drift < 0 || drift > TIMER_SYNC_TICKS) {
+				last_ts = sync_ts;
+				last_ticks = *ijiffies;
+				LM_DBG("System time changed, ignoring...\n");
+				continue;
+			}
+
+			if (drift > TIMER_MAX_DRIFT_TICKS) {
+				*(ijiffies) += (drift / ITIMER_TICK) * ITIMER_TICK;
+
+				ucnt += drift / ITIMER_TICK;
+				*(ujiffies) += (ucnt / umultiple) * (UTIMER_TICK);
+				ucnt = ucnt % umultiple;
+
+				cnt += (unsigned int)(drift / (UTIMER_TICK));
+				*(jiffies) += (cnt / multiple) * TIMER_TICK;
+				cnt = cnt % multiple;
 			}
 		}
 	}
@@ -539,6 +602,72 @@ int start_timer_processes(void)
 	return 0;
 error:
 	return -1;
+}
+
+
+inline static int handle_io(struct fd_map* fm, int idx,int event_type)
+{
+	switch(fm->type){
+		case F_TIMER_JOB:
+			handle_timer_job();
+			return 0;
+		case F_SCRIPT_ASYNC:
+			async_script_resume_f( &fm->fd, fm->data);
+			return 0;
+		case F_FD_ASYNC:
+			async_fd_resume( &fm->fd, fm->data);
+			return 0;
+		default:
+			LM_CRIT("unknown fd type %d in Timer Extra\n", fm->type);
+			return -1;
+	}
+	return -1;
+}
+
+
+int start_timer_extra_processes(int *chd_rank)
+{
+	pid_t pid;
+
+	(*chd_rank)++;
+	if ( (pid=internal_fork( "Timer handler"))<0 ) {
+		LM_CRIT("cannot fork Timer handler process\n");
+		return -1;
+	} else if (pid==0) {
+		/* new Timer process */
+		/* set a more detailed description */
+			set_proc_attrs("Timer handler");
+			if (init_child(*chd_rank) < 0) {
+				report_failure_status();
+				goto error;
+			}
+
+			report_conditional_status( 1, 0);
+
+			/* create the reactor for timer proc */
+			if ( init_worker_reactor( "Timer_extra", RCT_PRIO_MAX)<0 ) {
+				LM_ERR("failed to init reactor\n");
+				goto error;
+			}
+
+			/* init: start watching for the timer jobs */
+			if (reactor_add_reader( timer_fd_out, F_TIMER_JOB,
+			RCT_PRIO_TIMER,NULL)<0){
+				LM_CRIT("failed to add timer pipe_out to reactor\n");
+				goto error;
+			}
+
+			/* launch the reactor */
+			reactor_main_loop( 1/*timeout in sec*/, error , );
+
+			exit(-1);
+	}
+	/*parent*/
+	return 0;
+
+/* only from child process */
+error:
+	exit(-1);
 }
 
 

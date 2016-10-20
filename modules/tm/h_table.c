@@ -163,6 +163,12 @@ void free_cell( struct cell* dead_cell )
 		if (dead_cell->uac[i].path_vec.s) {
 			tm_shm_free_unsafe(dead_cell->uac[i].path_vec.s);
 		}
+		if (dead_cell->uac[i].adv_address.s) {
+			tm_shm_free_unsafe(dead_cell->uac[i].adv_address.s);
+		}
+		if (dead_cell->uac[i].adv_port.s) {
+			tm_shm_free_unsafe(dead_cell->uac[i].adv_port.s);
+		}
 		if (dead_cell->uac[i].duri.s) {
 			tm_shm_free_unsafe(dead_cell->uac[i].duri.s);
 		}
@@ -271,7 +277,7 @@ struct cell*  build_cell( struct sip_msg* p_msg, int full_uas)
 	/* get timer set id based on the transaction pointer, but
 	 * devide by 64 to avoid issues because pointer are 64 bits
 	 * aligned */
-	set = ( ((long)new_cell)>>tm_timer_shift ) % tm_table->timer_sets;
+	set = ( ((unsigned long)new_cell)>>tm_timer_shift ) % tm_table->timer_sets;
 
 	/* UAS */
 #ifdef EXTRA_DEBUG

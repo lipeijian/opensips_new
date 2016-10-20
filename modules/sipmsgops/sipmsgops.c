@@ -530,7 +530,7 @@ static int remove_hf_match_f(struct sip_msg* msg, char* pattern, char* regex_or_
 				continue;
 			}
 		} else {
-			LM_ERR("Unknow match type. Supported types are r (regex) and g (glob)");
+			LM_ERR("Unknown match type. Supported types are r (regex) and g (glob)");
 			return -1;
 		}
 		*(hf->name.s+hf->name.len) = tmp;
@@ -895,7 +895,7 @@ static int hname_match_fixup(void** param, int param_no)
 			LM_DBG("processing param1: %s as glob\n", *(char**)param);
 			fixup_str(param);
 		}else{
-			LM_ERR("Unknown match type '%c'\n", type);
+			LM_ERR("unknown match type '%c'\n", type);
 			return E_UNSPEC;
 		}
 	}
@@ -930,7 +930,7 @@ static int free_hname_match_fixup(void** param, int param_no)
 			LM_DBG("Freeing glob\n");
 			fixup_free_str_str(param, param_no);
 		}else{
-			LM_ERR("Unknown match type in free_hname_match_fixup. Please notify a developer.\n");
+			LM_ERR("unknown match type in free_hname_match_fixup. Please notify a developer.\n");
 		}
 	}
 
@@ -1077,12 +1077,10 @@ static int fixup_body_type(void** param, int param_no)
 
 static int has_body_f(struct sip_msg *msg, char *type, char *str2 )
 {
-	struct multi_body * m;
-	struct part * p;
+	struct body_part * p;
 
-	/* parse content len hdr */
 	if ( msg->content_length==NULL &&
-			(parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1||msg->content_length==NULL))
+	(parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1||msg->content_length==NULL))
 		return -1;
 
 	if (get_content_length (msg)==0) {
@@ -1105,26 +1103,15 @@ static int has_body_f(struct sip_msg *msg, char *type, char *str2 )
 	if (type==0)
 		return 1;
 
-	m = get_all_bodies(msg);
-
-	if (m == NULL)
-	{
-		LM_ERR("Failed to get bodies\n");
+	if (parse_sip_body(msg)<0 || msg->body==NULL) {
+		LM_DBG("no body found\n");
 		return -1;
 	}
 
-	/* if there is no multipart and the type is unspecified default to
-	   application/sdp */
-
-	if (m->from_multi_part == 0 && m->part_count == 1 && m->first->content_type == 0)
-	{
-		m->first->content_type = ((TYPE_APPLICATION << 16) + SUBTYPE_SDP);
-	}
-
-	p = m->first;
+	p = &msg->body->first;
 	while (p)
 	{
-		if( p->content_type == ((int)(long)type ) )
+		if( p->mime == ((int)(long)type ) )
 			return 1;
 		p = p->next;
 	}
@@ -1188,14 +1175,14 @@ out:
 
 static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 {
-	struct multi_body * m;
-	struct part * p;
+	struct sip_msg_body * b;
+	struct body_part * p;
 	int deleted = 0,mime;
 
 
 	/* parse content len hdr */
 	if ( msg->content_length==NULL &&
-			(parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1||msg->content_length==NULL))
+	(parse_headers(msg,HDR_CONTENTLENGTH_F, 0)==-1||msg->content_length==NULL))
 		return -1;
 
 	if (get_content_length (msg)==0) {
@@ -1206,10 +1193,9 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 
 	mime = parse_content_type_hdr(msg);
 
-	if( ( ((int)(long)type )>>16) == TYPE_MULTIPART || (mime >>16) != TYPE_MULTIPART)
+	if( ( ((int)(long)type )>>16) == TYPE_MULTIPART ||
+	(mime >>16) != TYPE_MULTIPART)
 	{
-
-
 		if( mime == ((int)(long)type ) )
 		{
 			strip_body_f(msg,NULL,NULL);
@@ -1218,32 +1204,20 @@ static int strip_body_f2(struct sip_msg *msg, char *type, char *str2 )
 		return -1;
 	}
 
-
-	m = get_all_bodies(msg);
-
-	if (m == NULL)
-	{
-		LM_ERR("Failed to get bodies\n");
+	if (parse_sip_body(msg)<0 || (b=msg->body)==NULL) {
+		LM_DBG("no body found\n");
 		return -1;
 	}
 
-	/* if there is no multipart and the type is unspecified default to
-	   application/sdp */
-
-	if (m->from_multi_part == 0 && m->part_count == 1 && m->first->content_type == 0)
-	{
-		m->first->content_type = ((TYPE_APPLICATION << 16) + SUBTYPE_SDP);
-	}
-
-	p = m->first;
-
+	p = &b->first;
 	deleted = -1;
+
 	while (p)
 	{
-		if( p->content_type == ((int)(long)type ) )
+		if( p->mime == ((int)(long)type ) )
 		{
-			if( del_lump( msg, p->all_data.s - msg->buf - 4 - m->boundary.len,
-						p->all_data.len + 6 + m->boundary.len, 0 ) == 0 )
+			if( del_lump( msg, p->all_data.s - msg->buf - 4 - b->boundary.len,
+						p->all_data.len + 6 + b->boundary.len, 0 ) == 0 )
 			{
 				LM_ERR("Failed to add body lump\n");
 				return -1;
@@ -1392,14 +1366,16 @@ static int is_audio_on_hold_f(struct sip_msg *msg, char *str1, char *str2 )
 	int sdp_session_num = 0, sdp_stream_num;
 	sdp_session_cell_t* sdp_session;
 	sdp_stream_cell_t* sdp_stream;
+	sdp_info_t* sdp;
 
-	if (0 == parse_sdp(msg)) {
+	if ( (sdp=parse_sdp(msg))!=NULL ) {
 		for(;;) {
-			sdp_session = get_sdp_session(msg, sdp_session_num);
+			sdp_session = get_sdp_session(sdp, sdp_session_num);
 			if(!sdp_session) break;
 			sdp_stream_num = 0;
 			for(;;) {
-				sdp_stream = get_sdp_stream(msg, sdp_session_num, sdp_stream_num);
+				sdp_stream = get_sdp_stream(sdp, sdp_session_num,
+					sdp_stream_num);
 				if(!sdp_stream) break;
 				if(sdp_stream->media.len==AUDIO_STR_LEN &&
 						strncmp(sdp_stream->media.s,AUDIO_STR,AUDIO_STR_LEN)==0 &&
@@ -1604,13 +1580,14 @@ static int sip_validate_hdrs(struct sip_msg *msg)
 				}
 				memset(disp, 0, sizeof(struct disposition));
 
-				switch (parse_disposition(&(hf->body), disp)) {
-					case -1:
-						free_disposition(&disp);
-					case -2:
-						LM_DBG("cannot parse disposition\n");
-						goto failed;
+				if (parse_disposition(&(hf->body), disp)<0) {
+					free_disposition(&disp);
+					LM_DBG("cannot parse disposition\n");
+					goto failed;
 				}
+				/* even if success, we need to free the parsed disposition
+				   hdr as it is not linked anywhere */
+				free_disposition(&disp);
 				break;
 
 				/* to-style headers */
@@ -1878,27 +1855,12 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s, char* pv_result)
 
 	/* if not CANCEL, check if it has body */
 	if (msg->first_line.type!=SIP_REQUEST || msg->REQ_METHOD!=METHOD_CANCEL) {
-		if (!msg->unparsed) {
+
+		if (get_body( msg, &body)!=0) {
 			strcpy(reason, "invalid parsing");
 			ret = SV_HDR_PARSE_ERROR;
 			goto failed;
 		}
-		hdrs_len=(unsigned int)(msg->unparsed-msg->buf);
-
-		if ((hdrs_len+2<=msg->len) && (strncmp(CRLF,msg->unparsed,CRLF_LEN)==0) )
-			body.s = msg->unparsed + CRLF_LEN;
-		else if ( (hdrs_len+1<=msg->len) &&
-				(*(msg->unparsed)=='\n' || *(msg->unparsed)=='\r' ) )
-			body.s = msg->unparsed + 1;
-		else {
-			/* no body */
-			body.s = NULL;
-			body.len = 0;
-		}
-
-		/* determine the length of the body */
-		if (body.s)
-			body.len = msg->buf + msg->len - body.s;
 
 		if (get_content_length(msg) != body.len) {
 			snprintf(reason, MAX_REASON-1, "invalid body - content length %ld different than actual body %d",
@@ -2029,7 +1991,7 @@ static int w_sip_validate(struct sip_msg *msg, char *flags_s, char* pv_result)
 						contacts = ((contact_body_t*)ptr->parsed)->contacts;
 						/* empty contacts header - something must be wrong */
 						if(contacts == NULL) {
-							strcpy(reason, "emtpy body for 'Contact' header");
+							strcpy(reason, "empty body for 'Contact' header");
 							ret = SV_CONTACT_PARSE_ERROR;
 							goto failed;
 						}

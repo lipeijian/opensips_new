@@ -783,7 +783,7 @@ int save_aux(struct sip_msg* _m, str* forced_binding, char* _d, char* _f, char* 
 						if (flags_s.s[st]=='0') {
 							sctx.flags |= REG_SAVE_PATH_OFF_FLAG; break; }
 					}
-				default: LM_WARN("unsuported flag %c \n",flags_s.s[st]);
+				default: LM_WARN("unsupported flag %c \n",flags_s.s[st]);
 			}
 		}
 	}
@@ -1222,8 +1222,3 @@ out_unlock:
 	return err;
 }
 
-int is_other_contact_f(struct sip_msg* msg, char* _d, char *_s)
-{
-	LM_WARN("Deprecated! Use is_ip_registered() instead!\n");
-	return is_ip_registered(msg, _d, NULL, _s);
-}

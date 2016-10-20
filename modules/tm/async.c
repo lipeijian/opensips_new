@@ -70,7 +70,7 @@ static inline void run_resume_route( int resume_route, struct sip_msg *msg)
 
 /* function triggered from reactor in order to continue the processing
  */
-int t_resume_async(int fd, void *param)
+int t_resume_async(int *fd, void *param)
 {
 	static struct sip_msg faked_req;
 	static struct ua_client uac;
@@ -83,7 +83,7 @@ int t_resume_async(int fd, void *param)
 	struct cell *t= ctx->t;
 	int route;
 
-	LM_DBG("resuming on fd %d, transaction %p \n",fd, t);
+	LM_DBG("resuming on fd %d, transaction %p \n",*fd, t);
 
 	if (current_processing_ctx) {
 		LM_CRIT("BUG - a context already set!\n");
@@ -122,17 +122,46 @@ int t_resume_async(int fd, void *param)
 
 	async_status = ASYNC_DONE; /* assume default status as done */
 	/* call the resume function in order to read and handle data */
-	return_code = ctx->resume_f( fd, &faked_req, ctx->resume_param );
+	return_code = ctx->resume_f( *fd, &faked_req, ctx->resume_param );
 	if (async_status==ASYNC_CONTINUE) {
 		/* do not run the resume route */
+		goto restore;
+	} else if (async_status==ASYNC_CHANGE_FD) {
+		if (return_code<0) {
+			LM_ERR("ASYNC_CHANGE_FD: given file descriptor shall be positive!\n");
+			goto restore;
+		} else if (return_code > 0 && return_code == *fd) {
+			/*trying to add the same fd; shall continue*/
+			LM_CRIT("You are trying to replace the old fd with the same fd!"
+					"Will act as in ASYNC_CONTINUE!\n");
+			goto restore;
+		}
+
+		/* remove the old fd from the reactor */
+		reactor_del_reader( *fd, -1, IO_FD_CLOSING);
+		*fd=return_code;
+
+		/* insert the new fd inside the reactor */
+		if (reactor_add_reader( *fd, F_SCRIPT_ASYNC, RCT_PRIO_ASYNC, (void*)ctx)<0 ) {
+			LM_ERR("failed to add async FD to reactor -> act in sync mode\n");
+			do {
+				return_code = ctx->resume_f( *fd, &faked_req, ctx->resume_param );
+				if (async_status == ASYNC_CHANGE_FD)
+					*fd=return_code;
+			} while(async_status==ASYNC_CONTINUE||async_status==ASYNC_CHANGE_FD);
+			goto route;
+		}
+
+		/* changed fd; now restore old state */
 		goto restore;
 	}
 
 	/* remove from reactor, we are done */
-	reactor_del_reader( fd, -1, IO_FD_CLOSING);
+	reactor_del_reader( *fd, -1, IO_FD_CLOSING);
 
+route:
 	if (async_status == ASYNC_DONE_CLOSE_FD)
-		close(fd);
+		close(*fd);
 
 	/* run the resume_route (some type as the original one) */
 	swap_route_type(route, ctx->route_type);
@@ -142,8 +171,14 @@ int t_resume_async(int fd, void *param)
 	/* no need for the context anymore */
 	shm_free(ctx);
 
-	context_destroy(CONTEXT_GLOBAL, current_processing_ctx);
-	pkg_free(current_processing_ctx);
+	/* free also the processing ctx if still set
+	 * NOTE: it may become null if inside the run_resume_route
+	 * another async jump was made (and context attached again
+	 * to transaction) */
+	if (current_processing_ctx) {
+		context_destroy(CONTEXT_GLOBAL, current_processing_ctx);
+		pkg_free(current_processing_ctx);
+	}
 
 restore:
 	/* restore original environment */
@@ -188,7 +223,8 @@ int t_handle_async(struct sip_msg *msg, struct action* a , int resume_route)
 	} else {
 		/* update the cloned UAS (from transaction)
 		 * with data from current msg */
-		update_cloned_msg_from_msg( t->uas.request, msg);
+		if (t->uas.request)
+			update_cloned_msg_from_msg( t->uas.request, msg);
 	}
 
 	/* run the function (the action) and get back from it the FD,
@@ -210,11 +246,25 @@ int t_handle_async(struct sip_msg *msg, struct action* a , int resume_route)
 	if (async_status>=0) {
 		/* async I/O was successfully launched */
 		fd = async_status;
+		if (msg->REQ_METHOD==METHOD_ACK ||
+		/* ^^^ end2end ACK, there is no actual transaction here */
+		t->uas.request==NULL
+		/* ^^^ local requests do not support async in local route */
+		) {
+			goto sync;
+		}
 	} else if (async_status==ASYNC_NO_IO) {
 		/* no IO, so simply go for resume route */
 		goto resume;
 	} else if (async_status==ASYNC_SYNC) {
 		/* IO already done in SYNC'ed way */
+		goto resume;
+	} else if (async_status==ASYNC_CHANGE_FD) {
+		LM_ERR("Incorrect ASYNC_CHANGE_FD status usage!"
+				"You should use this status only from the"
+				"resume function in case something went wrong"
+				"and you have other alternatives!\n");
+		/*FIXME should we go to resume or exit?it's quite an invalid scenario */
 		goto resume;
 	} else {
 		/* generic error, go for resume route */
@@ -274,9 +324,12 @@ sync:
 	/* run the resume function */
 	do {
 		return_code = ctx_f( fd, msg, ctx_p );
-	} while(async_status==ASYNC_CONTINUE);
+		if (async_status == ASYNC_CHANGE_FD)
+			fd = return_code;
+	} while(async_status==ASYNC_CONTINUE||async_status==ASYNC_CHANGE_FD);
 	/* run the resume route in sync mode */
 	run_resume_route( resume_route, msg);
+
 	/* break original script */
 	return 0;
 

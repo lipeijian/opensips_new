@@ -681,29 +681,6 @@ modparam("drouting", "gw_sock_avp", '$avp(77)')
 		</example>
 	</section>
 
-		<section>
-		<title><varname>gw_attrs_avp</varname> (str)</title>
-		<para>
-		The name of the avp for storing GW attrs in case they are requested at least
-		once in the script.
-		</para>
-		<para>
-		<emphasis>Default value is <quote>$avp(___dr_gw_att__)</quote> if <varname>use_partitions</varname> parameter is 0
-		or <quote>$avp(___dr_gw_att__partition_name)</quote> where partition_name is the name of the partition
-		containing the AVP (as fetched from the database) if <varname>use_partitions</varname> parameter is 1.
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>gw_attrs_avp</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("drouting", "gw_attrs_avp", '$avp(dr_attrs_gw)')
-modparam("drouting", "gw_attrs_avp", '$avp(11)')
-...
-	</programlisting>
-		</example>
-	</section>
-
 			<section>
 		<title><varname>rule_attrs_avp</varname> (str)</title>
 		<para>
@@ -818,7 +795,7 @@ modparam("drouting", "persistent_state", 0)
 		<para>
 			If enabled, the module will not allow do run multiple dr_reload
 			MI commands in parallel (with overlapping)  Any new reload will
-			be rejected (and discarded) while an existing reload is in 
+			be rejected (and discarded) while an existing reload is in
 			progress.
 			</para>
 			<para>
@@ -1072,6 +1049,33 @@ modparam("drouting", "db_partitions_table", "partition_defs")
 		</example>
 	</section>
 
+	<section>
+		<title><varname>partition_id_pvar</varname> (pvar)</title>
+		<para>
+			Variable which will store the name of the name partition when
+			<emphasis>wildcard(*)</emphasis> operatior is used.
+			<emphasis>Use_partitions</emphasis> must be set in order to
+			use this parameter.
+		</para>
+		<para>
+			NOTE: The variable must be WRITABLE!
+		</para>
+		<para>
+		<emphasis>Default value is <quote>null(not used)</quote>.
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>partition_id_pvar</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("drouting", "partition_id_pvar", "$var(matched_partition)")
+...
+</programlisting>
+		</example>
+	</section>
+
+
+
 </section>
 
 <section>
@@ -1117,6 +1121,7 @@ modparam("drouting", "db_partitions_table", "partition_defs")
 						parameter is 1 - both the partition name and the groupId may be statical
 						values or AVP specifications. If no group is specified the function will
 						try to query the dr_group table for the given partition to get this information.
+						If <emphasis>* (wildcard)</emphasis> operator is used all partitions shall be checked.
 					</para>
 					</listitem>
 					</itemizedlist>
@@ -1648,7 +1653,8 @@ if (goes_to_gw("my_partition", "1", , "$var(gw_attrs)")) {
 					<para>
 					<emphasis role='bold'>partition</emphasis> (mandatory if <varname>use_partitions
 					</varname> parameter is 1, otherwise it will be omitted altogether) - Partition
-					containing the destination/gw to be checked.
+					containing the destination/gw to be checked. If <emphasis>*(wildcard)</emphasis>
+					operator is used all partitions shall be checked.
 					</para>
 				</listitem>
 				<listitem>
@@ -2094,7 +2100,7 @@ Partition:: part_test Date=Tue Aug 12 12:24:13 2014
 	<section>
 		<title><varname>dr_number_routing</varname></title>
 		<para>
-			Gets the matched prefix along with the  list of the gateways / carriers to which a number 
+			Gets the matched prefix along with the  list of the gateways / carriers to which a number
 			would be routed when using the do_routing function
 		</para>
 		<itemizedlist>

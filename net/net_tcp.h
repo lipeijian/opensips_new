@@ -52,8 +52,11 @@ void tcp_connect_proc_to_tcp_main( int proc_no, int chid );
 /* tells how many processes the TCP layer will create */
 int tcp_count_processes(void);
 
-/* starts all TCP related processes */
+/* starts all TCP worker processes */
 int tcp_start_processes(int *chd_rank, int *startup_done);
+
+/* starts the TCP listening process */
+int tcp_start_listener(void);
 
 /* MI function to list all existing TCP connections */
 struct mi_root *mi_tcp_list_conns(struct mi_root *cmd, void *param);
@@ -74,7 +77,7 @@ int tcp_connect_blocking(int s, const struct sockaddr *servaddr,
 /********************** TCP conn management functions ************************/
 
 /* returns the connection identified by either the id or the destination to */
-int tcp_conn_get(int id, struct ip_addr* ip, int port,
+int tcp_conn_get(int id, struct ip_addr* ip, int port, enum sip_protos proto,
 		struct tcp_connection** conn, int* conn_fd);
 
 /* creates a new tcp conn around a newly connected socket

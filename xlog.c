@@ -43,6 +43,11 @@ int xlog_buf_size = 4096;
 int xlog_force_color = 0;
 int xlog_default_level = L_ERR;
 
+/* this variable is used by the xlog_level to print (inside an xlog) 
+ * the current logging level of that xlog() ; it has no meaning outside
+ * the scope of an xlog() ! */
+int xlog_level = INT_MAX;
+
 static int buf_init(void)
 {
 	LM_DBG("initializing...\n");
@@ -93,8 +98,12 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
 
 	log_len = xlog_buf_size;
 
-	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0)
+	xlog_level = level;
+	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0) {
+		xlog_level = INT_MAX;
 		return -1;
+	}
+	xlog_level = INT_MAX;
 
 	/* log_buf[log_len] = '\0'; */
 	LM_GEN1((int)level, "%.*s", log_len, log_buf);
@@ -112,8 +121,12 @@ int xlog_1(struct sip_msg* msg, char* frm, char* str2)
 
 	log_len = xlog_buf_size;
 
-	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0)
+	xlog_level = xlog_default_level;
+	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0) {
+		xlog_level = INT_MAX;
 		return -1;
+	}
+	xlog_level = INT_MAX;
 
 	/* log_buf[log_len] = '\0'; */
 	LM_GEN1(xlog_default_level, "%.*s", log_len, log_buf);
@@ -132,8 +145,12 @@ int xdbg(struct sip_msg* msg, char* frm, char* str2)
 
 	log_len = xlog_buf_size;
 
-	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0)
+	xlog_level = L_DBG;
+	if(xl_print_log(msg, (pv_elem_t*)frm, &log_len)<0) {
+		xlog_level = INT_MAX;
 		return -1;
+	}
+	xlog_level = INT_MAX;
 
 	/* log_buf[log_len] = '\0'; */
 	LM_GEN1(L_DBG, "%.*s", log_len, log_buf);

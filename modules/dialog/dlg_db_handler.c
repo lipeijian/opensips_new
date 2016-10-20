@@ -388,7 +388,7 @@ void read_dialog_profiles(char *b, int l, struct dlg_cell *dlg,int double_check,
 	char *end;
 	char *p,*s,*e;
 	char bk;
-	int use_cached;
+	unsigned repl_type;
 
 	end = b + l;
 	p = b;
@@ -402,7 +402,7 @@ void read_dialog_profiles(char *b, int l, struct dlg_cell *dlg,int double_check,
 
 		if (double_check) {
 			LM_DBG("Double checking profile - if it exists we'll skip it \n");
-			use_cached = 0;
+			repl_type = REPL_NONE;
 
 			/* check if this is a shared profile, and remove /s for manual
 			 * matching */
@@ -416,11 +416,13 @@ void read_dialog_profiles(char *b, int l, struct dlg_cell *dlg,int double_check,
 				/* skip spaces after p */
 				for (++s; *s == ' ' && s < e; s++);
 				if ( s < e && *s == 's')
-				use_cached=1;
+				repl_type = REPL_CACHEDB;
+				else if (s < e && *s == 'b')
+				repl_type = REPL_PROTOBIN;
 			}
 
 			for (it=dlg->profile_links;it;it=it->next) {
-				if (it->profile->use_cached == use_cached &&
+				if (it->profile->repl_type == repl_type &&
 					it->profile->name.len == double_check_name.len &&
 					memcmp(it->profile->name.s,double_check_name.s,
 						   double_check_name.len) == 0) {
@@ -857,7 +859,7 @@ int remove_dialog_from_db(struct dlg_cell * cell)
 	LM_DBG("callid was %.*s\n", cell->callid.len, cell->callid.s );
 
 	/* dialog saved */
-	run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+	run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 	return 0;
 }
@@ -899,7 +901,7 @@ int update_dialog_timeout_info(struct dlg_cell * cell)
 	}
 
 	/* dialog saved */
-	run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+	run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 	cell->flags &= ~(DLG_FLAG_CHANGED);
 
@@ -1004,7 +1006,7 @@ int update_dialog_dbinfo(struct dlg_cell * cell)
 		}
 
 		/* dialog saved */
-		run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+		run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 		cell->flags &= ~(DLG_FLAG_NEW|DLG_FLAG_CHANGED|DLG_FLAG_VP_CHANGED);
 
@@ -1044,7 +1046,7 @@ int update_dialog_dbinfo(struct dlg_cell * cell)
 		}
 
 		/* dialog saved */
-		run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+		run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 		cell->flags &= ~(DLG_FLAG_CHANGED|DLG_FLAG_VP_CHANGED);
 	} else if (cell->flags & DLG_FLAG_VP_CHANGED) {
@@ -1071,7 +1073,7 @@ int update_dialog_dbinfo(struct dlg_cell * cell)
 			goto error;
 		}
 
-		run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+		run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 		cell->flags &= ~DLG_FLAG_VP_CHANGED;
 	} else {
@@ -1161,7 +1163,7 @@ str* write_dialog_vars( struct dlg_val *vars)
  * deallocated if the dialog ends */
 str* write_dialog_profiles( struct dlg_profile_link *links)
 {
-	static str o = {NULL,0},cached_marker={"/s",2};
+	static str o = {NULL,0},cached_marker={"/s",2}, bin_marker={"/b", 2};
 	static int o_l = 0;
 	struct dlg_profile_link *link;
 	unsigned int l,i;
@@ -1176,8 +1178,8 @@ str* write_dialog_profiles( struct dlg_profile_link *links)
 		for( i=0 ; i<link->value.len ; i++ )
 			if (link->value.s[i]=='|' || link->value.s[i]=='#'
 					|| link->value.s[i]=='\\') l++;
-		if (link->profile->use_cached)
-			l+=cached_marker.len;
+		if (link->profile->repl_type!=REPL_NONE/*==(CACHEDB||PROTOBIN)*/)
+			l+=cached_marker.len; /* same length for both */
 	}
 
 	/* allocate the string to be stored */
@@ -1195,8 +1197,11 @@ str* write_dialog_profiles( struct dlg_profile_link *links)
 	o.len = l;
 	p = o.s;
 	for ( link=links; link ; link=link->next) {
-		if (link->profile->use_cached)
+		if (link->profile->repl_type == REPL_CACHEDB)
 			p += write_pair( p, &link->profile->name, &cached_marker,
+							&link->value);
+		else if (link->profile->repl_type == REPL_PROTOBIN)
+			p += write_pair( p, &link->profile->name, &bin_marker,
 							&link->value);
 		else
 			p += write_pair( p, &link->profile->name, NULL, &link->value);
@@ -1220,6 +1225,13 @@ static inline void set_final_update_cols(db_val_t *vals, struct dlg_cell *cell,
 	LM_DBG("DLG vals and profiles should %s[%x:%d]\n",
 			(db_flush_vp && (cell->flags & DLG_FLAG_VP_CHANGED)) ?
 			"be saved" : "not be saved", cell->flags, db_flush_vp);
+
+	if (on_shutdown || db_flush_vp) {
+		/* it is very likely to flush the vals/profiles to DB, so trigger the
+		 * callback to see if other modules may want to add more vals/profiles
+		 before the actual writting */
+		run_dlg_callbacks( DLGCB_DB_WRITE_VP, cell, 0, DLG_DIR_NONE, NULL, 1);
+	}
 
 	if (on_shutdown || (db_flush_vp && (cell->flags & DLG_FLAG_VP_CHANGED))) {
 		if (cell->vals==NULL) {
@@ -1383,14 +1395,15 @@ void dialog_update_db(unsigned int ticks, void * param)
 				if((dialog_dbf.insert(dialog_db_handle, insert_keys,
 				values, DIALOG_TABLE_TOTAL_COL_NO)) !=0){
 					LM_ERR("could not add another dialog to db\n");
-					goto error;
+					cell = cell->next;
+					continue;
 				}
 
 				if (ins_done==0)
 					ins_done=1;
 
 				/* dialog saved */
-				run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+				run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL,1);
 
 				cell->flags &= ~(DLG_FLAG_NEW |DLG_FLAG_CHANGED|DLG_FLAG_VP_CHANGED);
 
@@ -1424,11 +1437,12 @@ void dialog_update_db(unsigned int ticks, void * param)
 				if((dialog_dbf.update(dialog_db_handle, (insert_keys), 0,
 				(values), (insert_keys+15), (values+15), 1, 11)) !=0) {
 					LM_ERR("could not update database info\n");
-					goto error;
+					cell = cell->next;
+					continue;
 				}
 
 				/* dialog saved */
-				run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+				run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL,1);
 
 				cell->flags &= ~(DLG_FLAG_CHANGED|DLG_FLAG_VP_CHANGED);
 			} else if (db_flush_vp && (cell->flags & DLG_FLAG_VP_CHANGED)) {
@@ -1443,10 +1457,11 @@ void dialog_update_db(unsigned int ticks, void * param)
 				if((dialog_dbf.update(dialog_db_handle, (insert_keys), 0,
 				(values), (insert_keys+21), (values+21), 1, 4)) !=0) {
 					LM_ERR("could not update database info\n");
-					goto error;
+					cell = cell->next;
+					continue;
 				}
 
-				run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+				run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL,1);
 
 				cell->flags &= ~DLG_FLAG_VP_CHANGED;
 			}
@@ -1465,14 +1480,8 @@ void dialog_update_db(unsigned int ticks, void * param)
 			LM_ERR("failed to flush rows to DB\n");
 	}
 
-
-
 	dlg_timer_flush_del();
 	return;
-
-error:
-	dlg_unlock( d_table, entry);
-	dlg_timer_flush_del();
 }
 
 static int sync_dlg_db_mem(void)
@@ -2036,16 +2045,14 @@ static int restore_dlg_db(void)
 			if((dialog_dbf.insert(dialog_db_handle, insert_keys,
 			values, DIALOG_TABLE_TOTAL_COL_NO)) !=0){
 				LM_ERR("could not add another dialog to db\n");
-
-				dlg_unlock(d_table, e);
-				return -1;
+				continue;
 			}
 
 			if (ins_done == 0)
 				ins_done = 1;
 
 			/* dialog saved */
-			run_dlg_callbacks( DLGCB_SAVED, cell, 0, DLG_DIR_NONE, 0);
+			run_dlg_callbacks( DLGCB_DB_SAVED, cell, 0, DLG_DIR_NONE, NULL, 1);
 
 			cell->flags &= ~(DLG_FLAG_NEW |DLG_FLAG_CHANGED|DLG_FLAG_VP_CHANGED);
 		}

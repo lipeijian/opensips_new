@@ -67,7 +67,7 @@
  * the TCP, UDP, timer and fifo children.
  */
 
-
+#include "reactor_defs.h" /*keep this first*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -81,7 +81,6 @@
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <sys/utsname.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -118,6 +117,7 @@
 #include "hash_func.h"
 #include "pt.h"
 #include "script_cb.h"
+#include "dset.h"
 #include "blacklists.h"
 
 #include "pt.h"
@@ -137,7 +137,15 @@
 
 static char* version=OPENSIPS_FULL_VERSION;
 static char* flags=OPENSIPS_COMPILE_FLAGS;
-char compiled[]= __TIME__ " " __DATE__ ;
+#ifdef VERSION_NODATE
+char compiled[] =  "" ;
+#else
+#ifdef VERSION_DATE
+const char compiled[] =  VERSION_DATE ;
+#else
+const char compiled[] =  __TIME__ " " __DATE__ ;
+#endif
+#endif
 
 /**
  * Print compile-time constants
@@ -170,7 +178,9 @@ int children_no = CHILD_NO;		/* number of children processing requests */
 enum poll_types io_poll_method=0; 	/*!< by default choose the best method */
 int sig_flag = 0;              /* last signal received */
 
-int dont_fork = 0;
+/* activate debug mode */
+int debug_mode = 0;
+/* do not become daemon, stay attached to the console */
 int no_daemon_mode = 0;
 /* assertion statements in script. disabled by default */
 int enable_asserts = 0;
@@ -320,7 +330,7 @@ void cleanup(int show_status)
 		pkg_status();
 	}
 #endif
-	cleanup_debug();
+	cleanup_log_level();
 
 	if (pt) shm_free(pt);
 	pt=0;
@@ -374,7 +384,7 @@ static void kill_all_children(int signum)
 
 /**
  * Timeout handler during wait for children exit.
- * If this handler is called, a critical timeout has occured while
+ * If this handler is called, a critical timeout has occurred while
  * waiting for the children to finish => we should kill everything and exit
  * \param signo signal for killing the children
  */
@@ -390,7 +400,7 @@ static void sig_alarm_kill(int signo)
 
 /**
  * Timeout handler during wait for children exit.
- * like sig_alarm_kill, but the timeout has occured when cleaning up,
+ * like sig_alarm_kill, but the timeout has occurred when cleaning up,
  * try to leave a core for future diagnostics
  * \param signo signal for killing the children
  * \see sig_alarm_kill
@@ -541,10 +551,6 @@ static void sig_usr(int signo)
 		if (sig_flag==0) sig_flag=signo;
 		else /*  previous sig. not processed yet, ignoring? */
 			return; ;
-		if (dont_fork)
-				/* only one proc, doing everything from the sig handler,
-				unsafe, but this is only for debugging mode*/
-			handle_sigs();
 	}else{
 		/* process the important signals */
 		switch(signo){
@@ -641,91 +647,48 @@ static int main_loop(void)
 
 	chd_rank=0;
 
-	if (init_debug() != 0) {
-		LM_ERR("failed to init logging levels\n");
+	if (start_module_procs()!=0) {
+		LM_ERR("failed to fork module processes\n");
 		goto error;
 	}
 
-	if (dont_fork){
-
-		if (create_status_pipe() < 0) {
-			LM_ERR("failed to create status pipe\n");
+	if(startup_rlist.a) {/* if a startup route was defined */
+		startup_done = (int*)shm_malloc(sizeof(int));
+		if(startup_done == NULL) {
+			LM_ERR("No more shared memory\n");
 			goto error;
 		}
+		*startup_done = 0;
+	}
 
-		if (udp_init_nofork() < 0) {
-			LM_ERR("failed to init UDP for no fork mode\n");
-			goto error;
-		}
+	/* fork for the timer process*/
+	if (start_timer_processes()!=0) {
+		LM_CRIT("cannot start timer process(es)\n");
+		goto error;
+	}
 
-		/* try to drop privileges */
-		if (do_suid(uid, gid)==-1)
-			goto error;
+	/* fork all processes required by UDP network layer */
+	if (udp_start_processes( &chd_rank, startup_done)<0) {
+		LM_CRIT("cannot start TCP processes\n");
+		goto error;
+	}
 
-		if (start_module_procs()!=0) {
-			LM_ERR("failed to fork module processes\n");
-			goto error;
-		}
+	/* fork all processes required by TCP network layer */
+	if (tcp_start_processes( &chd_rank, startup_done)<0) {
+		LM_CRIT("cannot start TCP processes\n");
+		goto error;
+	}
 
-		/* we need another process to act as the timer*/
-		if (start_timer_processes()!=0) {
-			LM_CRIT("cannot start timer process(es)\n");
-			goto error;
-		}
+	/* fork for the extra timer processes */
+	if (start_timer_extra_processes( &chd_rank )!=0) {
+		LM_CRIT("cannot start timer extra process(es)\n");
+		goto error;
+	}
 
-		is_main=1;
-
-		udp_start_nofork();
-		/* udp_start_nofork() returns only if error */
-
-		/* in case of failed startup, behave as "attendant" to trigger
-		 * proper cleanup sequance (and proper signal handler !!!).
-		 * So, reset the dont_fork (as it will force inline signal handling)*/
-		dont_fork = 0;
-		return -1;
-
-	} else {  /* don't fork */
-
-		if (trans_init_all_listeners()<0) {
-			LM_ERR("failed to init all SIP listeners, aborting\n");
-			goto error;
-		}
-
-		/* all processes should have access to all the sockets (for sending)
-		 * so we open all first*/
-		if (do_suid(uid, gid)==-1) goto error; /* try to drop privileges */
-
-		if (start_module_procs()!=0) {
-			LM_ERR("failed to fork module processes\n");
-			goto error;
-		}
-
-		if(startup_rlist.a) {/* if a startup route was defined */
-			startup_done = (int*)shm_malloc(sizeof(int));
-			if(startup_done == NULL) {
-				LM_ERR("No more shared memory\n");
-				goto error;
-			}
-			*startup_done = 0;
-		}
-
-		/* fork for the timer process*/
-		if (start_timer_processes()!=0) {
-			LM_CRIT("cannot start timer process(es)\n");
-			goto error;
-		}
-
-		/* fork all processes required by UDP network layer */
-		if (udp_start_processes( &chd_rank, startup_done)<0) {
-			LM_CRIT("cannot start TCP processes\n");
-			goto error;
-		}
-
-		/* fork all processes required by TCP network layer */
-		if (tcp_start_processes( &chd_rank, startup_done)<0) {
-			LM_CRIT("cannot start TCP processes\n");
-			goto error;
-		}
+	/* fork the TCP listening process */
+	if (tcp_start_listener()<0) {
+		LM_CRIT("cannot start TCP listener process\n");
+		goto error;
 	}
 
 	/* this is the main process -> it shouldn't send anything */
@@ -759,7 +722,7 @@ error:
 	is_main=1;  /* if we are here, we are the "main process",
 				  any forked children should exit with exit(-1) and not
 				  ever use return */
-	report_conditional_status( (!dont_fork), -1);
+	report_failure_status();
 	return -1;
 
 }
@@ -776,13 +739,14 @@ error:
 int main(int argc, char** argv)
 {
 	/* configure by default logging to syslog */
-	int cfg_log_stderr = 0;
+	int cfg_log_stderr = 1;
 	FILE* cfg_stream;
 	int c,r;
 	char *tmp;
 	int tmp_len;
 	int port;
 	int proto;
+	int protos_no;
 	char *options;
 	int ret;
 	unsigned int seed;
@@ -806,8 +770,36 @@ int main(int argc, char** argv)
 					};
 
 					break;
+			case 'm':
+					shm_mem_size=strtol(optarg, &tmp, 10) * 1024 * 1024;
+					if (tmp &&(*tmp)){
+						LM_ERR("bad shmem size number: -m %s\n", optarg);
+						goto error00;
+					};
+					break;
+			case 'u':
+					user=optarg;
+					break;
+			case 'g':
+					group=optarg;
+					break;
 		}
 	}
+
+	/* get uid/gid */
+	if (user){
+		if (user2uid(&uid, &gid, user)<0){
+			LM_ERR("bad user name/uid number: -u %s\n", user);
+			goto error00;
+		}
+	}
+	if (group){
+		if (group2gid(&gid, group)<0){
+			LM_ERR("bad group name/gid number: -u %s\n", group);
+			goto error00;
+		}
+	}
+
 	/*init pkg mallocs (before parsing cfg but after parsing cmd line !)*/
 	if (init_pkg_mallocs()==-1)
 		goto error00;
@@ -831,16 +823,10 @@ int main(int argc, char** argv)
 					cfg_log_stderr=1; /* force stderr logging */
 					break;
 			case 'm':
-					shm_mem_size=strtol(optarg, &tmp, 10) * 1024 * 1024;
-					if (tmp &&(*tmp)){
-						LM_ERR("bad shmem size number: -m %s\n", optarg);
-						goto error00;
-					};
-
+					/* ignoring it, parsed previously */
 					break;
 			case 'M':
 					/* ignoring it, parsed previously */
-
 					break;
 			case 'b':
 					maxbuffer=strtol(optarg, &tmp, 10);
@@ -879,10 +865,11 @@ int main(int argc, char** argv)
 					received_dns|=DO_REV_DNS;
 				    break;
 			case 'd':
-					(*debug)++;
+					*log_level = debug_mode ? L_DBG : (*log_level)+1;
 					break;
 			case 'D':
-					dont_fork=1;
+					debug_mode=1;
+					*log_level = L_DBG;
 					break;
 			case 'F':
 					no_daemon_mode=1;
@@ -911,7 +898,6 @@ int main(int argc, char** argv)
 					print_ct_constants();
 					printf("%s compiled on %s with %s\n", __FILE__,
 							compiled, COMPILER );
-
 					exit(0);
 					break;
 			case 'h':
@@ -926,10 +912,10 @@ int main(int argc, char** argv)
 					chroot_dir=optarg;
 					break;
 			case 'u':
-					user=optarg;
+					/* ignoring it, parsed previously */
 					break;
 			case 'g':
-					group=optarg;
+					/* ignoring it, parsed previously */
 					break;
 			case 'P':
 					pid_file=optarg;
@@ -1005,30 +991,7 @@ try_again:
 	yydebug = 1;
 #endif
 
-	/*
-	 * initializes transport interfaces - we initialize them here because we
-	 * can have listening interfaces declared in the command line
-	 */
-	if (trans_init() < 0) {
-		LM_ERR("cannot initialize transport interface\n");
-		goto error;
-	}
-
-		/* get uid/gid */
-	if (user){
-		if (user2uid(&uid, &gid, user)<0){
-			LM_ERR("bad user name/uid number: -u %s\n", user);
-			goto error00;
-		}
-	}
-	if (group){
-		if (group2gid(&gid, group)<0){
-			LM_ERR("bad group name/gid number: -u %s\n", group);
-			goto error00;
-		}
-	}
-
-		/*init shm mallocs
+	/*  init shm mallocs
 	 *  this must be here
 	 *     -to allow setting shm mem size from the command line
 	 *     -it must be also before init_timer and init_tcp
@@ -1061,15 +1024,6 @@ try_again:
 		return -1;
 	}
 
-#ifdef EXTRA_DEBUG
-	print_rl();
-#endif
-
-	if (no_daemon_mode+dont_fork > 1) {
-		LM_ERR("cannot use -D (fork=no) and -F together\n");
-		return ret;
-	}
-
 	/* init the resolver, before fixing the config */
 	resolv_init();
 
@@ -1082,10 +1036,15 @@ try_again:
 	}
 
 	/* load transport protocols */
-	if (trans_load() < 0) {
+	protos_no = trans_load();
+	if (protos_no < 0) {
 		LM_ERR("cannot load transport protocols\n");
 		goto error;
-	}
+	} else if (protos_no == 0) {
+		LM_ERR("no transport protocol loaded\n");
+		goto error;
+	} else
+		LM_DBG("Loaded %d transport protocols\n", protos_no);
 
 	/* fix parameters */
 	if (working_dir==0) working_dir="/";
@@ -1102,13 +1061,6 @@ try_again:
 	print_aliases();
 	printf("\n");
 
-	if (dont_fork){
-		LM_WARN("no fork mode %s\n",
-				(protos[PROTO_UDP].listeners)?(
-				(protos[PROTO_UDP].listeners->next)?" and more than one listen"
-				" address found(will use only the first one)":""
-				):"and no udp listen address found" );
-	}
 	if (config_check){
 		LM_NOTICE("config file ok, exiting...\n");
 		return 0;
@@ -1116,26 +1068,66 @@ try_again:
 
 	time(&startup_time);
 
-
-
 	/* Init statistics */
 	init_shm_statistics();
 
 	/*init UDP networking layer*/
 	if (udp_init()<0){
-		LM_CRIT("could not initialize tcp, exiting...\n");
+		LM_CRIT("could not initialize tcp\n");
 		goto error;
 	}
 	/*init TCP networking layer*/
 	if (tcp_init()<0){
-		LM_CRIT("could not initialize tcp, exiting...\n");
+		LM_CRIT("could not initialize tcp\n");
 		goto error;
 	}
 
-	/* init_daemon? */
-	if (!dont_fork){
+	if (create_status_pipe() < 0) {
+		LM_ERR("failed to create status pipe\n");
+		goto error;
+	}
+
+	if (debug_mode) {
+
+		LM_NOTICE("DEBUG MODE activated\n");
+		if (no_daemon_mode==0) {
+			LM_NOTICE("disabling daemon mode (found enabled)\n");
+			no_daemon_mode = 1;
+		}
+		if (log_stderr==0) {
+			LM_NOTICE("enabling logging to standard error (found disabled)\n");
+			log_stderr = 1;
+		}
+		if (*log_level<L_DBG) {
+			LM_NOTICE("setting logging to debug level (found on %d)\n",
+				*log_level);
+			*log_level = L_DBG;
+		}
+		if (disable_core_dump) {
+			LM_NOTICE("enabling core dumping (found off)\n");
+			disable_core_dump = 0;
+		}
+		if (udp_count_processes()!=0) {
+			if (children_no!=2) {
+				LM_NOTICE("setting UDP children to 2 (found %d)\n",
+					children_no);
+				children_no = 2;
+			}
+		}
+		if (tcp_count_processes()!=0) {
+			if (tcp_children_no!=2) {
+				LM_NOTICE("setting TCP children to 2 (found %d)\n",
+					tcp_children_no);
+				tcp_children_no = 2;
+			}
+		}
+
+	} else { /* debug_mode */
+
+		/* init_daemon */
 		if ( daemonize((log_name==0)?argv[0]:log_name, &own_pgid) <0 )
 			goto error;
+
 	}
 
 	/* install signal handlers */
@@ -1146,8 +1138,8 @@ try_again:
 
 	if (disable_core_dump) set_core_dump(0, 0);
 	else set_core_dump(1, shm_mem_size+pkg_mem_size+4*1024*1024);
-	if (open_files_limit>0){
-		if(increase_open_fds(open_files_limit)<0){
+	if (open_files_limit>0) {
+		if(set_open_fds_limit()<0){
 			LM_ERR("ERROR: error could not increase file limits\n");
 			goto error;
 		}
@@ -1160,6 +1152,12 @@ try_again:
 	LM_INFO("using %ld Mb shared memory\n", ((shm_mem_size/1024)/1024));
 	LM_INFO("using %ld Mb private memory per process\n",
 		((pkg_mem_size/1024)/1024));
+
+	/* init async reactor */
+	if (init_reactor_size()<0) {
+		LM_CRIT("failed to init internal reactor, exiting...\n");
+		goto error;
+	}
 
 	/* init timer */
 	if (init_timer()<0){
@@ -1192,6 +1190,11 @@ try_again:
 	/* init resolver's blacklist */
 	if (resolv_blacklist_init()!=0) {
 		LM_CRIT("failed to create DNS blacklist\n");
+		goto error;
+	}
+
+	if (init_dset() != 0) {
+		LM_ERR("failed to initialize SIP forking logic!\n");
 		goto error;
 	}
 
@@ -1248,9 +1251,24 @@ try_again:
 	if ( (r=fix_rls())!=0){
 		LM_ERR("failed to fix configuration with err code %d\n", r);
 		goto error;
-	};
+	}
 
-	ret=main_loop();
+	if (init_log_level() != 0) {
+		LM_ERR("failed to init logging levels\n");
+		goto error;
+	}
+
+	if (trans_init_all_listeners()<0) {
+		LM_ERR("failed to init all SIP listeners, aborting\n");
+		goto error;
+	}
+
+	/* all processes should have access to all the sockets (for sending)
+	 * so we open all first*/
+	if (do_suid(uid, gid)==-1)
+		goto error;
+
+	ret = main_loop();
 
 error:
 	/*kill everything*/
@@ -1258,5 +1276,6 @@ error:
 	/*clean-up*/
 	cleanup(0);
 error00:
+	LM_NOTICE("Exiting....\n");
 	return ret;
 }

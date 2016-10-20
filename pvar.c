@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2010-2014 OpenSIPS Solutions
+ * Copyright (C) 2010-2016 OpenSIPS Solutions
  * Copyright (C) 2005-2009 Voice Sistem SRL
  * Copyright (C) 2001-2003 FhG Fokus
  *
@@ -88,12 +88,6 @@ static str str_null   = { _str_null_hlp, 6 };
 
 static char _str_empty_hlp[1]  = { 0 };
 static str str_empty  = { _str_empty_hlp, 0 };
-
-static char _str_5060_hlp[5]   = {'5','0','6','0',0};
-static str str_5060   = { _str_5060_hlp, 4 };
-
-static char _str_udp_hlp[4]  = {'u','d','p',0};
-static str str_udp    = { _str_udp_hlp, 3 };
 
 static char _str_request_route_hlp[] = {'r','e','q','u','e','s','t','_','r','o','u','t','e',0};
 static str str_request_route    = { _str_request_route_hlp, 13 };
@@ -247,16 +241,6 @@ int pv_get_null(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 	res->flags = PV_VAL_NULL;
 	return 0;
 }
-static int pv_get_udp(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
-{
-	return pv_get_strintval(msg, param, res, &str_udp, (int)PROTO_UDP);
-}
-
-static int pv_get_5060(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
-{
-	return pv_get_strintval(msg, param, res, &str_5060, 5060);
-}
-
 
 /************************************************************/
 static int pv_get_pid(struct sip_msg *msg, pv_param_t *param,
@@ -421,7 +405,7 @@ static int pv_get_ruri(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL || res==NULL)
 		return -1;
 
-	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesnt have a ruri */
+	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesn't have a ruri */
 		return pv_get_null(msg, param, res);
 
 	if(msg->parsed_uri_ok==0 /* R-URI not parsed*/ && parse_sip_msg_uri(msg)<0)
@@ -453,7 +437,7 @@ static int pv_get_ouri(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL || res==NULL)
 		return -1;
 
-	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesnt have a ruri */
+	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesn't have a ruri */
 		return pv_get_null(msg, param, res);
 
 	if(msg->parsed_orig_ruri_ok==0
@@ -468,6 +452,9 @@ static int pv_get_ouri(struct sip_msg *msg, pv_param_t *param,
 static int pv_get_xuri_attr(struct sip_msg *msg, struct sip_uri *parsed_uri,
 		pv_param_t *param, pv_value_t *res)
 {
+	unsigned short proto;
+	str proto_s;
+
 	if(param->pvn.u.isname.name.n==1) /* username */
 	{
 		if(parsed_uri->user.s==NULL || parsed_uri->user.len<=0)
@@ -479,12 +466,17 @@ static int pv_get_xuri_attr(struct sip_msg *msg, struct sip_uri *parsed_uri,
 		return pv_get_strval(msg, param, res, &parsed_uri->host);
 	} else if(param->pvn.u.isname.name.n==3) /* port */ {
 		if(parsed_uri->port.s==NULL)
-			return pv_get_5060(msg, param, res);
+			return pv_get_uintval(msg, param, res,
+				get_uri_port( parsed_uri, &proto));
 		return pv_get_strintval(msg, param, res, &parsed_uri->port,
 				(int)parsed_uri->port_no);
 	} else if(param->pvn.u.isname.name.n==4) /* protocol */ {
-		if(parsed_uri->transport_val.s==NULL)
-			return pv_get_udp(msg, param, res);
+		if(parsed_uri->transport_val.s==NULL) {
+			get_uri_port(parsed_uri, &proto);
+			proto_s.s = protos[proto].name;
+			proto_s.len = strlen(proto_s.s);
+			return pv_get_strintval(msg, param, res, &proto_s, (int)proto);
+		}
 		return pv_get_strintval(msg, param, res, &parsed_uri->transport_val,
 				(int)parsed_uri->proto);
 	}
@@ -498,7 +490,7 @@ static int pv_get_ruri_attr(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL)
 		return -1;
 
-	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesnt have a ruri */
+	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesn't have a ruri */
 		return pv_get_null(msg, param, res);
 
 	if(msg->parsed_uri_ok==0 /* R-URI not parsed*/ && parse_sip_msg_uri(msg)<0)
@@ -515,7 +507,7 @@ static int pv_get_ouri_attr(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL)
 		return -1;
 
-	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesnt have a ruri */
+	if(msg->first_line.type == SIP_REPLY)	/* REPLY doesn't have a ruri */
 		return pv_get_null(msg, param, res);
 
 	if(msg->parsed_orig_ruri_ok==0
@@ -1023,19 +1015,6 @@ static int pv_get_bflags(struct sip_msg *msg, pv_param_t *param,
 	return pv_get_strval(msg, param, res, &buf);
 }
 
-static int pv_get_sflags(struct sip_msg *msg, pv_param_t *param,
-		pv_value_t *res)
-{
-	str buf;
-
-	if (!msg)
-		return -1;
-
-	buf = bitmask_to_flag_list(FLAG_TYPE_SCRIPT, getsflags());
-
-	return pv_get_strval(msg, param, res, &buf);
-}
-
 static int pv_get_callid(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
@@ -1059,7 +1038,8 @@ static int pv_get_srcip(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL)
 		return -1;
 
-	s.s = ip_addr2a(&msg->rcv.src_ip);
+	if ( (s.s=ip_addr2a(&msg->rcv.src_ip))==NULL)
+		return pv_get_null(msg, param, res);
 	s.len = strlen(s.s);
 	return pv_get_strval(msg, param, res, &s);
 }
@@ -1384,6 +1364,8 @@ static int pv_get_dsturi_attr(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res)
 {
 	struct sip_uri uri;
+	unsigned short proto;
+	str proto_s;
 
 	if(msg==NULL)
 		return -1;
@@ -1406,11 +1388,15 @@ static int pv_get_dsturi_attr(struct sip_msg *msg, pv_param_t *param,
 		return pv_get_strval(msg, param, res, &uri.host);
 	} else if(param->pvn.u.isname.name.n==2) /* port */ {
 		if(uri.port.s==NULL)
-			return pv_get_5060(msg, param, res);
+			return pv_get_uintval(msg, param, res, get_uri_port(&uri, &proto));
 		return pv_get_strintval(msg, param, res, &uri.port, (int)uri.port_no);
 	} else if(param->pvn.u.isname.name.n==3) /* proto */ {
-		if(uri.transport_val.s==NULL)
-			return pv_get_udp(msg, param, res);
+		if(uri.transport_val.s==NULL) {
+			get_uri_port(&uri, &proto);
+			proto_s.s = protos[proto].name;
+			proto_s.len = strlen(proto_s.s);
+			return pv_get_strintval(msg, param, res, &proto_s, (int)proto);
+		}
 		return pv_get_strintval(msg, param, res, &uri.transport_val,
 				(int)uri.proto);
 	}
@@ -1429,9 +1415,9 @@ static int pv_get_content_type(struct sip_msg *msg, pv_param_t *param,
 	int idxf=-1;
 	int distance=0;
 	char buf[BUFLEN];
-	struct multi_body* multi;
-	struct part* body_part;
-	struct part* neg_index[2];
+	struct sip_msg_body* sbody;
+	struct body_part* body_part;
+	struct body_part* neg_index[2];
 
 	if(msg==NULL)
 		return -1;
@@ -1456,16 +1442,15 @@ static int pv_get_content_type(struct sip_msg *msg, pv_param_t *param,
 			return pv_get_strval(msg, param, res, &msg->content_type->body);
 	}
 
-	if ((multi=get_all_bodies(msg)) == 0 || multi->first == 0) {
-		LM_ERR("cannot get multi body\n");
+	if ( parse_sip_body(msg)<0 || (sbody=msg->body)==NULL ) {
+		LM_DBG("no body found\n");
 		return pv_get_null(msg, param, res);
-
 	}
 
 	/* one contenttype request */
 	if (idxf != PV_IDX_ALL) {
 		if (idx< 0) {
-			neg_index[0] = neg_index[1] = multi->first;
+			neg_index[0] = neg_index[1] = &sbody->first;
 			/*distance=last_body_postition-searched_body_position*/
 			distance -= idx+1;
 			while (neg_index[1]->next) {
@@ -1482,10 +1467,10 @@ static int pv_get_content_type(struct sip_msg *msg, pv_param_t *param,
 				return pv_get_null(msg, param, res);
 			}
 
-			s.s = convert_mime2string_CT(neg_index[0]->content_type);
+			s.s = convert_mime2string_CT(neg_index[0]->mime);
 			s.len = strlen(s.s);
 		} else {
-			body_part = multi->first;
+			body_part = &sbody->first;
 			distance = idx;
 			while (distance && body_part->next) {
 				distance--;
@@ -1497,7 +1482,7 @@ static int pv_get_content_type(struct sip_msg *msg, pv_param_t *param,
 				return pv_get_null(msg, param, res);
 			}
 
-			s.s = convert_mime2string_CT(body_part->content_type);
+			s.s = convert_mime2string_CT(body_part->mime);
 			s.len = strlen(s.s);
 		}
 	} else {
@@ -1507,9 +1492,9 @@ static int pv_get_content_type(struct sip_msg *msg, pv_param_t *param,
 		s.len = msg->content_type->body.len+1;
 
 		/* copy all the other contenttypes */
-		body_part = multi->first;
+		body_part = &sbody->first;
 		while (body_part) {
-			s.s = convert_mime2string_CT(body_part->content_type);
+			s.s = convert_mime2string_CT(body_part->mime);
 			if (s.len + strlen(s.s) >= BUFLEN) {
 				LM_CRIT("buffer overflow! Too many contenttypes!\n");
 				return pv_get_null(msg, param, res);
@@ -1557,9 +1542,9 @@ static int pv_get_msg_body(struct sip_msg *msg, pv_param_t *param,
 	int idx=-1;
 	int idxf=-1;
 	int distance=0;
-	struct multi_body* multi;
-	struct part* body_part;
-	struct part* neg_index[2];
+	struct sip_msg_body* sbody;
+	struct body_part* body_part;
+	struct body_part* neg_index[2];
 
 	if(msg==NULL)
 		return -1;
@@ -1579,13 +1564,13 @@ static int pv_get_msg_body(struct sip_msg *msg, pv_param_t *param,
 		goto end;
 	}
 
-	if ((multi=get_all_bodies(msg)) == 0 || multi->first == 0) {
-		LM_ERR("cannot get multi body\n");
+	if ( parse_sip_body(msg)<0 || (sbody=msg->body)==NULL ) {
+		LM_DBG("no body found\n");
 		return pv_get_null(msg, param, res);
 	}
 
 	if (idx<0) {
-		neg_index[0] = neg_index[1] = multi->first;
+		neg_index[0] = neg_index[1] = &sbody->first;
 		/*distance=last_body_postition-searched_body_position*/
 		distance -= idx+1;
 		while (neg_index[1]->next) {
@@ -1605,7 +1590,7 @@ static int pv_get_msg_body(struct sip_msg *msg, pv_param_t *param,
 		s.s = neg_index[0]->body.s;
 		s.len = neg_index[0]->body.len;
 	} else {
-		body_part = multi->first;
+		body_part = &sbody->first;
 		distance = idx;
 		while (distance && body_part->next) {
 			distance--;
@@ -1912,7 +1897,7 @@ static int pv_get_branch_fields(struct sip_msg *msg, pv_param_t *param,
 	if(msg==NULL || res==NULL)
 		return -1;
 
-	if(msg->first_line.type == SIP_REPLY || nr_branches==0 )
+	if(msg->first_line.type == SIP_REPLY || get_nr_branches() == 0)
 		return pv_get_null(msg, param, res);
 
 	/* get the index */
@@ -1958,9 +1943,9 @@ static int pv_get_branch_fields(struct sip_msg *msg, pv_param_t *param,
 	/* numerical index */
 	if (idx<0) {
 		/* index from the end */
-		if (-idx > nr_branches)
+		if (-idx > get_nr_branches())
 			return pv_get_null(msg, param, res);
-		idx = nr_branches + idx;
+		idx = get_nr_branches() + idx;
 	}
 
 	/* return the request branch info */
@@ -2003,6 +1988,8 @@ static int pv_get_avp(struct sip_msg *msg,  pv_param_t *param, pv_value_t *res)
 		LM_ERR("invalid index\n");
 		return -1;
 	}
+	if (idxf==PV_IDX_APPEND)
+		return pv_get_null(msg, param, res);
 
 	if ((avp=search_first_avp(name_type, avp_name, &avp_value, 0))==0)
 		return pv_get_null(msg, param, res);
@@ -2450,6 +2437,14 @@ int pv_set_avp(struct sip_msg* msg, pv_param_t *param,
 			goto error;
 		}
 	}
+	else if (idxf == PV_IDX_APPEND) /* add AVP at the end */
+	{
+		if (add_avp_last(flags, avp_name, avp_val)<0)
+		{
+			LM_ERR("error - cannot add AVP\n");
+			goto error;
+		}
+	}
 	else {
 		if (add_avp(flags, avp_name, avp_val)<0)
 		{
@@ -2855,12 +2850,12 @@ int pv_set_branch_fields(struct sip_msg* msg, pv_param_t *param,
 	}
 
 	if (idx<0) {
-		idx = nr_branches + idx;
+		idx = get_nr_branches() + idx;
 	}
 
-	if (idx<0 || idx>=nr_branches) {
+	if (idx<0 || idx>=get_nr_branches()) {
 		LM_ERR("SCRIPT BUG - inexisting branch assignment [%d/%d]\n",
-			nr_branches, idx);
+			get_nr_branches(), idx);
 		return -1;
 	}
 
@@ -3103,6 +3098,21 @@ int pv_parse_avp_name(pv_spec_p sp, str *in)
 	return 0;
 }
 
+int pv_parse_avp_index(pv_spec_p sp, str *in)
+{
+	#define AVP_APPEND_IDX "append"
+
+	if(in==NULL || in->s==NULL || sp==NULL)
+		return -1;
+
+	if ( (in->len==(sizeof(AVP_APPEND_IDX)-1)) &&
+	strncasecmp(in->s,AVP_APPEND_IDX,in->len)==0) {
+		sp->pvp.pvi.type = PV_IDX_APPEND;
+		return 0;
+	}
+	return pv_parse_index(sp,in);
+}
+
 int pv_parse_index(pv_spec_p sp, str *in)
 {
 	char *p;
@@ -3213,12 +3223,98 @@ int pv_get_cfg_file_name(struct sip_msg *msg,  pv_param_t *param, pv_value_t *re
 	return 0;
 }
 
+
+int pv_set_log_level(struct sip_msg* msg, pv_param_t *param, int op,
+															pv_value_t *val)
+{
+	if(param==NULL)
+	{
+		LM_ERR("bad parameters\n");
+		return -1;
+	}
+
+	if(val==NULL || (val->flags&(PV_VAL_NULL|PV_VAL_NONE))!=0) {
+		/* reset the value to default */
+		reset_proc_log_level();
+	} else {
+		if ((val->flags&PV_TYPE_INT)==0) {
+			LM_ERR("input for $log_level found not to be an interger\n");
+			return -1;
+		}
+		set_proc_log_level(val->ri);
+	}
+
+	return 0;
+}
+
+int pv_get_log_level(struct sip_msg *msg,  pv_param_t *param, pv_value_t *res)
+{
+	int l;
+
+	if (param==NULL) {
+		LM_CRIT("BUG - bad parameters\n");
+		return -1;
+	}
+
+	if(res == NULL) {
+		return -1;
+	}
+
+	res->ri = *log_level;
+	res->rs.s = int2str( (unsigned long)res->ri, &l);
+	res->rs.len = l;
+
+	res->flags = PV_VAL_STR|PV_VAL_INT|PV_TYPE_INT;
+
+	return 0;
+}
+
+int pv_get_xlog_level(struct sip_msg *msg,  pv_param_t *param, pv_value_t *res)
+{
+#define _set_static_string(_s,_ss) {_s.s=_ss;_s.len=sizeof(_ss)-1;}
+	if(res == NULL) {
+		return -1;
+	}
+
+	switch(xlog_level) {
+	case L_ALERT:
+		_set_static_string( res->rs, DP_ALERT_TEXT);
+		break;
+	case L_CRIT:
+		_set_static_string( res->rs, DP_CRIT_TEXT);
+		break;
+	case L_ERR:
+		_set_static_string( res->rs, DP_ERR_TEXT);
+		break;
+	case L_WARN:
+		_set_static_string( res->rs, DP_WARN_TEXT);
+		break;
+	case L_NOTICE:
+		_set_static_string( res->rs, DP_NOTICE_TEXT);
+		break;
+	case L_INFO:
+		_set_static_string( res->rs, DP_INFO_TEXT);
+		break;
+	case L_DBG:
+		_set_static_string( res->rs, DP_DBG_TEXT);
+		break;
+	default:
+		return pv_get_null(msg, param, res);
+	}
+
+	res->flags = PV_VAL_STR;
+
+	return 0;
+}
+
+
+
 /**
  * the table with core pseudo-variables
  */
 static pv_export_t _pv_names_table[] = {
 	{{"avp", (sizeof("avp")-1)}, PVT_AVP, pv_get_avp, pv_set_avp,
-		pv_parse_avp_name, pv_parse_index, 0, 0},
+		pv_parse_avp_name, pv_parse_avp_index, 0, 0},
 	{{"hdr", (sizeof("hdr")-1)}, PVT_HDR, pv_get_hdr, 0, pv_parse_hdr_name,
 		pv_parse_index, 0, 0},
 	{{"hdrcnt", (sizeof("hdrcnt")-1)}, PVT_HDRCNT, pv_get_hdrcnt, 0, pv_parse_hdr_name, 0, 0, 0},
@@ -3365,6 +3461,9 @@ static pv_export_t _pv_names_table[] = {
 	{{"from.user", (sizeof("from.user")-1)}, /* */
 		PVT_FROM_USERNAME, pv_get_from_attr, 0,
 		0, 0, pv_init_iname, 2},
+	{{"log_level", (sizeof("log_level")-1)}, /* per process log level*/
+		PVT_LOG_LEVEL, pv_get_log_level, pv_set_log_level,
+		0, 0, 0, 0},
 	{{"mb", (sizeof("mb")-1)}, /* */
 		PVT_MSG_BUF, pv_get_msg_buf, 0,
 		0, 0, 0, 0},
@@ -3479,9 +3578,6 @@ static pv_export_t _pv_names_table[] = {
 	{{"Rp", (sizeof("Rp")-1)}, /* */
 		PVT_RCVPORT, pv_get_rcvport, 0,
 		0, 0, 0, 0},
-	{{"sf", (sizeof("sf")-1)}, /* */
-		PVT_SFLAGS, pv_get_sflags, 0,
-		0, 0, 0, 0},
 	{{"src_ip", (sizeof("src_ip")-1)}, /* */
 		PVT_SRCIP, pv_get_srcip, 0,
 		0, 0, 0, 0},
@@ -3542,6 +3638,8 @@ static pv_export_t _pv_names_table[] = {
 	{{"cfg_line", sizeof("cfg_line")-1}, PVT_LINE_NUMBER, pv_get_line_number, 0,
 		0, 0, 0, 0 },
 	{{"cfg_file", sizeof("cfg_file")-1}, PVT_CFG_FILE_NAME, pv_get_cfg_file_name, 0,
+	0, 0, 0, 0 },
+	{{"xlog_level", sizeof("xlog_level")-1}, PVT_XLOG_LEVEL, pv_get_xlog_level, 0,
 	0, 0, 0, 0 },
 	{{0,0}, 0, 0, 0, 0, 0, 0, 0}
 };
@@ -3736,8 +3834,8 @@ done_inm:
 	has_inner_name = (pvstate==2||pvstate==5)?1:0;
 	if((pte = pv_lookup_spec_name(&pvname, e, has_inner_name))==NULL)
 	{
-		LM_ERR("pvar \"%.*s\"%s not found\n", pvname.len, pvname.s,
-			has_inner_name?"(inner_name)":"");
+		LM_ERR("unknown script var $%.*s%s, maybe a 'loadmodule' statement "
+		       "is missing?\n", pvname.len, pvname.s,has_inner_name ? "()":"");
 		goto error;
 	}
 	if(pvstate==2 || pvstate==5)
@@ -4086,7 +4184,7 @@ int pv_get_spec_index(struct sip_msg* msg, pv_param_p ip, int *idx, int *flags)
 	if(ip->pvi.type == 0)
 		return 0;
 
-	if(ip->pvi.type == PV_IDX_ALL) {
+	if(ip->pvi.type == PV_IDX_ALL || ip->pvi.type == PV_IDX_APPEND) {
 		return 0;
 	}
 
@@ -4208,10 +4306,9 @@ int pv_printf(struct sip_msg* msg, pv_elem_p list, char *buf, int *len)
 {
 	int n;
 	pv_value_t tok;
+	str print;
 	pv_elem_p it;
 	char *cur;
-	char *p;
-	int l;
 
 	if(msg==NULL || list==NULL || buf==NULL || len==NULL)
 		return -1;
@@ -4242,38 +4339,16 @@ int pv_printf(struct sip_msg* msg, pv_elem_p list, char *buf, int *len)
 		if(it->spec.type!=PVT_NONE
 				&& pv_get_spec_value(msg, &(it->spec), &tok)==0)
 		{
-			if(tok.flags&PV_VAL_NULL)
-				tok.rs = str_null;
-			if (tok.flags&PV_VAL_STR || tok.flags&PV_VAL_NULL) {
-				if(n+tok.rs.len < *len)
-				{
-					if(tok.rs.len>0)
-					{
-						memcpy(cur, tok.rs.s, tok.rs.len);
-						n += tok.rs.len;
-						cur += tok.rs.len;
-					}
-				} else {
-					LM_ERR("no more space for spec value [%d][%d]\n",
-						n, tok.rs.len);
-					goto overflow;
-				}
-			} else if (tok.flags&(PV_VAL_INT|PV_TYPE_INT)){
-				p = int2str(tok.ri, &l);
-				if (n+l < *len)
-				{
-					memcpy(cur, p, l);
-					n += l;
-					cur += l;
-				} else {
-					LM_ERR("no more space for spec value [%d][%d]\n",
-						n, tok.rs.len);
-					goto overflow;
-				}
-			} else {
-				LM_ERR("unknown type %x\n", tok.flags);
-				return -1;
+			print = pv_value_print(&tok);
+			if (n + print.len >= *len) {
+				LM_ERR("no more space for spec value [%d][%d]\n",
+				       n, print.len);
+				goto overflow;
 			}
+
+			memcpy(cur, print.s, print.len);
+			n += print.len;
+			cur += print.len;
 		}
 	}
 
@@ -4369,6 +4444,25 @@ int pv_elem_free_all(pv_elem_p log)
 		pkg_free(t);
 	}
 	return 0;
+}
+
+str pv_value_print(pv_value_t *val)
+{
+	str printed = str_init(NULL);
+
+	if (val->flags & PV_VAL_NULL)
+		return str_null;
+
+	if (val->flags & PV_VAL_STR)
+		return val->rs;
+
+	if (val->flags & (PV_VAL_INT|PV_TYPE_INT)) {
+		printed.s = int2str(val->ri, &printed.len);
+		return printed;
+	}
+
+	LM_ERR("unknown type %x\n", val->flags);
+	return str_empty;
 }
 
 void pv_value_destroy(pv_value_t *val)

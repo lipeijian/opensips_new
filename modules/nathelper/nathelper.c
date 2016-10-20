@@ -491,20 +491,6 @@ mod_init(void)
 		rcv_avp_type = 0;
 	}
 
-	if (force_socket_str) {
-		socket_str.s=force_socket_str;
-		socket_str.len=strlen(socket_str.s);
-		force_socket=grep_sock_info(&socket_str,0,0);
-	}
-
-	/* create raw socket? */
-	if (natping_socket && natping_socket[0]) {
-		if (get_natping_socket( natping_socket, &raw_ip, &raw_port)!=0)
-			return -1;
-		if (init_raw_socket() < 0)
-			return -1;
-	}
-
 	if (nortpproxy_str.s==NULL || nortpproxy_str.s[0]==0) {
 		nortpproxy_str.len = 0;
 		nortpproxy_str.s = NULL;
@@ -517,6 +503,7 @@ mod_init(void)
 			nortpproxy_str.s = NULL;
 	}
 
+	/* enable all the pinging stuff only if pinging interval is set */
 	if (natping_interval > 0) {
 		bind_usrloc = (bind_usrloc_t)find_export("ul_bind_usrloc", 1, 0);
 		if (!bind_usrloc) {
@@ -526,6 +513,20 @@ mod_init(void)
 
 		if (bind_usrloc(&ul) < 0) {
 			return -1;
+		}
+
+		if (force_socket_str) {
+			socket_str.s=force_socket_str;
+			socket_str.len=strlen(socket_str.s);
+			force_socket=grep_sock_info(&socket_str,0,0);
+		}
+
+		/* create raw socket? */
+		if (natping_socket && natping_socket[0]) {
+			if (get_natping_socket( natping_socket, &raw_ip, &raw_port)!=0)
+				return -1;
+			if (init_raw_socket() < 0)
+				return -1;
 		}
 
 		natping_state =(unsigned int *) shm_malloc(sizeof(unsigned int));
@@ -547,13 +548,11 @@ mod_init(void)
 		}
 
 		fix_flag_name(sipping_flag_str, sipping_flag);
-		sipping_flag = get_flag_id_by_name(FLAG_TYPE_BRANCH, sipping_flag_str);
-
+		sipping_flag=get_flag_id_by_name(FLAG_TYPE_BRANCH, sipping_flag_str);
 		sipping_flag = (sipping_flag==-1)?0:(1<<sipping_flag);
 
 		fix_flag_name(rm_on_to_flag_str, rm_on_to_flag);
-		rm_on_to_flag = get_flag_id_by_name(FLAG_TYPE_BRANCH, rm_on_to_flag_str);
-
+		rm_on_to_flag=get_flag_id_by_name(FLAG_TYPE_BRANCH, rm_on_to_flag_str);
 		rm_on_to_flag = (rm_on_to_flag==-1)?0:(1<<rm_on_to_flag);
 
 		/* set reply function if SIP natping is enabled */
@@ -569,7 +568,7 @@ mod_init(void)
 			sipping_method.len = strlen(sipping_method.s);
 			sipping_from.len = strlen(sipping_from.s);
 			exports.response_f = sipping_rpl_filter;
-			init_sip_ping();
+			init_sip_ping(rm_on_to_flag);
 		}
 
 		if (REMOVE_ON_TIMEOUT &&
@@ -579,8 +578,8 @@ mod_init(void)
 		}
 
 		if (REMOVE_ON_TIMEOUT &&
-				register_timer("pg-chk-timer", ping_checker_timer,
-					NULL, ping_checker_interval, TIMER_FLAG_DELAY_ON_DELAY) < 0) {
+		register_timer("pg-chk-timer", ping_checker_timer,
+		NULL, ping_checker_interval, TIMER_FLAG_DELAY_ON_DELAY) < 0) {
 			LM_ERR("failed to register ping checker timer\n");
 			return -1;
 		}
@@ -700,6 +699,7 @@ fix_nated_contact_f(struct sip_msg* msg, char* str1, char* str2)
 
 		cp = ip_addr2a(&msg->rcv.src_ip);
 		len = (hostport.s-c->uri.s) + strlen(cp) + 6 /* :port */
+			+ 2 /* just in case if IPv6 */
 			+ (params?params->len+(is_enclosed?0:2):0)
 			+ 1 + left.len + left2.len;
 		buf = pkg_malloc(len);
@@ -709,15 +709,28 @@ fix_nated_contact_f(struct sip_msg* msg, char* str1, char* str2)
 		}
 		temp = hostport.s[0]; hostport.s[0] = '\0';
 		if (params==NULL) {
-			len1 = snprintf(buf, len, "%s%s:%d%.*s%.*s", c->uri.s, cp,
-				msg->rcv.src_port,left.len,left.s,left2.len,left2.s);
+			if (msg->rcv.src_ip.af==AF_INET6)
+				len1 = snprintf(buf, len, "%s[%s]:%d%.*s%.*s", c->uri.s, cp,
+					msg->rcv.src_port,left.len,left.s,left2.len,left2.s);
+			else
+				len1 = snprintf(buf, len, "%s%s:%d%.*s%.*s", c->uri.s, cp,
+					msg->rcv.src_port,left.len,left.s,left2.len,left2.s);
 		} else if (!is_enclosed) {
-			len1 = snprintf(buf, len, "<%s%s:%d%.*s>", c->uri.s, cp,
-				msg->rcv.src_port,params->len,params->s);
+			if (msg->rcv.src_ip.af==AF_INET6)
+				len1 = snprintf(buf, len, "<%s[%s]:%d%.*s>", c->uri.s, cp,
+					msg->rcv.src_port,params->len,params->s);
+			else
+				len1 = snprintf(buf, len, "<%s%s:%d%.*s>", c->uri.s, cp,
+					msg->rcv.src_port,params->len,params->s);
 		} else {
-			len1 = snprintf(buf, len, "%s%s:%d%.*s%.*s%.*s", c->uri.s, cp,
-				msg->rcv.src_port,params->len,params->s,
-				left.len,left.s,left2.len,left2.s);
+			if (msg->rcv.src_ip.af==AF_INET6)
+				len1 = snprintf(buf, len, "%s[%s]:%d%.*s%.*s%.*s", c->uri.s, cp,
+					msg->rcv.src_port,params->len,params->s,
+					left.len,left.s,left2.len,left2.s);
+			else
+				len1 = snprintf(buf, len, "%s%s:%d%.*s%.*s%.*s", c->uri.s, cp,
+					msg->rcv.src_port,params->len,params->s,
+					left.len,left.s,left2.len,left2.s);
 		}
 		if (len1 < len)
 			len = len1;
@@ -795,32 +808,23 @@ sdp_1918(struct sip_msg* msg)
 {
 	str body, ip;
 	int pf;
-	struct multi_body * bodies;
-	struct part *p;
+	struct body_part *p;
 	int ret = 0;
 
-	bodies = get_all_bodies(msg);
-
-	if( bodies == NULL)
+	if ( parse_sip_body(msg)<0 || msg->body==NULL )
 	{
 		LM_DBG("Unable to get bodies from message\n");
 		return 0;
 	}
 
-	p = bodies->first;
-
-	while(p)
-	{
+	for ( p=&msg->body->first ; p ; p=p->next) {
 
 		body = p->body;
 		trim_r(body);
-		if( p->content_type != ((TYPE_APPLICATION << 16) + SUBTYPE_SDP)
-							 || body.len == 0)
-		{
-			p=p->next;
-			continue;
-		}
 
+		if( p->mime != ((TYPE_APPLICATION << 16) + SUBTYPE_SDP)
+							 || body.len == 0)
+			continue;
 
 		if (extract_mediaip(&body, &ip, &pf, "c=") == -1)
 		{
@@ -831,7 +835,6 @@ sdp_1918(struct sip_msg* msg)
 			return 0;
 
 		ret |= (is1918addr(&ip) == 1) ? 1 : 0;
-		p= p->next;
 	}
 
 	return ret;
@@ -875,11 +878,10 @@ contact_rport(struct sip_msg* msg)
 	struct sip_uri uri;
 	contact_t* c;
 	struct hdr_field *hdr;
-	int ct_port;
 
 	for( hdr=NULL,c=NULL ; get_contact_uri(msg, &uri, &c, &hdr)==0 ; ) {
-		ct_port=uri.port_no?uri.port_no:((uri.type==SIPS_URI_T)?SIPS_PORT:SIP_PORT);
-		if ( msg->rcv.src_port != ct_port ) return 1;
+		if ( msg->rcv.src_port != get_uri_port( &uri, NULL) )
+			return 1;
 	}
 
 	return 0;
@@ -1146,33 +1148,26 @@ fix_nated_sdp_f(struct sip_msg* msg, char* str1, char* str2)
 	int level;
 	char *buf;
 	struct lump* anchor;
-	struct multi_body * bodies;
-	struct part * p;
+	struct body_part * p;
 
 	level = (int)(long)str1;
 	if (str2 && pv_printf_s( msg, (pv_elem_p)str2, &ip)!=0)
 		return -1;
 
-	bodies = get_all_bodies(msg);
-
-	if( bodies == NULL)
+	if ( parse_sip_body(msg)<0 || msg->body==NULL )
 	{
 		LM_ERR("Unable to get bodies from message\n");
 		return -1;
 	}
 
-	p = bodies->first;
-
-	while(p)
+	for ( p=&msg->body->first ; p ; p=p->next )
 	{
 		body = p->body;
 		trim_r(body);
-		if( p->content_type != ((TYPE_APPLICATION << 16) + SUBTYPE_SDP)
+		if( p->mime != ((TYPE_APPLICATION << 16) + SUBTYPE_SDP)
 							 || body.len == 0)
-		{
-			p=p->next;
 			continue;
-		}
+
 		if (level & (ADD_ADIRECTION | ADD_ANORTPPROXY)) {
 			msg->msg_flags |= FL_FORCE_ACTIVE;
 			anchor = anchor_lump(msg, body.s + body.len - msg->buf, 0);
@@ -1220,8 +1215,6 @@ fix_nated_sdp_f(struct sip_msg* msg, char* str1, char* str2)
 			if (replace_sdp_ip(msg, &body, "c=", str2?&ip:0)==-1)
 				return -1;
 		}
-
-		p= p->next;
 	}
 
 	return 1;
@@ -1293,7 +1286,6 @@ static int send_raw(const char *buf, int buf_len, union sockaddr_union *to,
 static void
 nh_timer(unsigned int ticks, void *timer_idx)
 {
-	static unsigned int iteration = 0;
 	int rval;
 	void *buf = NULL;
 	void *cp;
@@ -1322,8 +1314,8 @@ nh_timer(unsigned int ticks, void *timer_idx)
 
 	for ( d=ul.get_next_udomain(NULL); d; d=ul.get_next_udomain(d)) {
 		rval = ul.get_domain_ucontacts(d, buf, cblen, (ping_nated_only?ul.nat_flag:0),
-			((unsigned int)(unsigned long)timer_idx)*natping_interval+iteration,
-			natping_partitions*natping_interval,
+			((unsigned int)(unsigned long)timer_idx)*natping_interval+
+			(ticks%natping_interval), natping_partitions*natping_interval,
 			REMOVE_ON_TIMEOUT?1:0);
 
 		if (rval<0) {
@@ -1341,8 +1333,8 @@ nh_timer(unsigned int ticks, void *timer_idx)
 			}
 
 			rval = ul.get_domain_ucontacts(d, buf, cblen, (ping_nated_only?ul.nat_flag:0),
-				((unsigned int)(unsigned long)timer_idx)*natping_interval+iteration,
-				natping_partitions*natping_interval,
+				((unsigned int)(unsigned long)timer_idx)*natping_interval+
+				(ticks%natping_interval), natping_partitions*natping_interval,
 				REMOVE_ON_TIMEOUT?1:0);
 			if (rval != 0) {
 				goto done;
@@ -1378,8 +1370,9 @@ nh_timer(unsigned int ticks, void *timer_idx)
 			}
 
 			if (next_hop.proto != PROTO_NONE && next_hop.proto != PROTO_UDP &&
-			    (natping_tcp == 0 || (next_hop.proto != PROTO_TCP &&
-									 next_hop.proto != PROTO_TLS &&
+				(natping_tcp == 0 || (next_hop.proto != PROTO_TCP &&
+									  next_hop.proto != PROTO_TLS &&
+									  next_hop.proto != PROTO_WSS &&
 									  next_hop.proto != PROTO_WS)))
 				continue;
 
@@ -1428,9 +1421,6 @@ nh_timer(unsigned int ticks, void *timer_idx)
 done:
 	if (buf)
 		pkg_free(buf);
-	iteration++;
-	if (iteration==natping_interval)
-		iteration = 0;
 }
 
 
@@ -1643,26 +1633,58 @@ ping_checker_timer(unsigned int ticks, void *timer_idx)
 	ctime=now;
 
 	/* detect cells for which threshold has been exceeded */
+
+	/* something very fishy here */
 	lock_get(&table->timer_list.mutex);
 	first = last = table->timer_list.first;
 
-	while (last != table->timer_list.last
-			&& ((ctime - last->timestamp) > ping_threshold))
+	if (table->timer_list.first == NULL || table->timer_list.last == NULL) {
+		/* nothing to do here - empty list */
+		goto out_release_lock;
+	}
+
+	/* only valid elements */
+	if (table->timer_list.first == table->timer_list.last
+			&& ((ctime-last->timestamp) < ping_threshold)) {
+		goto out_release_lock;
+	}
+
+	/* at least one invalid element
+	 *
+	 */
+	prev=NULL;
+	while (last != LIST_END_CELL
+			&& ((ctime-last->timestamp)>ping_threshold)) {
+		prev = last;
 		last = last->tnext;
+	}
 
-	if (last == table->timer_list.last)
-		table->timer_list.first = table->timer_list.last = NULL;
-	else
-		table->timer_list.first = last->tnext;
 
-	/* last will be the first valid element in timer list */
-	last = table->timer_list.first;
+	if (prev != NULL) {
+		/* have at least 1 element to remove */
+		if (last == LIST_END_CELL) {
+			/* all the list contains expired elements */
+			table->timer_list.first = table->timer_list.last = NULL;
+		} else {
+			/* still have non expired elements
+			 * move list start to first valid one */
+			table->timer_list.first = last;
+		}
+
+		last = prev;
+		last->tnext = LIST_END_CELL;
+	} else {
+		/* nothing to remove - timer list remains the same */
+		goto out_release_lock;;
+	}
 
 	lock_release(&table->timer_list.mutex);
 
-
+	/*
+	 * getting here means we have at least one element in the list to remove
+	 */
 	cell = first;
-	while (cell &&  cell != last) {
+	do {
 		if (cell->timestamp == 0) {
 			/* ping confirmed and unlinked from hash; only free the cell */
 			prev = cell;
@@ -1689,11 +1711,11 @@ ping_checker_timer(unsigned int ticks, void *timer_idx)
 
 			remove_given_cell(cell, &table->entries[cell->hash_id]);
 
+			/* we put the lock on cell which now moved into prev */
+			unlock_hash(cell->hash_id);
+
 			prev = cell;
 			cell = cell->tnext;
-
-			/* we put the lock on cell which now moved into prev */
-			unlock_hash(prev->hash_id);
 
 			shm_free(prev);
 
@@ -1707,12 +1729,15 @@ ping_checker_timer(unsigned int ticks, void *timer_idx)
 			cell = cell->tnext;
 
 			/* allow cell to be reintroduced in timer list */
-			prev->tnext = NULL;
+			prev->tnext = FREE_CELL;
 
 			/* we put the lock on cell which now moved into prev */
 			unlock_hash(prev->hash_id);
 		}
-	}
+	} while (cell != LIST_END_CELL);
+
+out_release_lock:
+	lock_release(&table->timer_list.mutex);
 }
 
 

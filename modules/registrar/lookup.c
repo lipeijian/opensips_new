@@ -55,12 +55,9 @@
 
 #define ua_re_check(return) \
 	if (flags & REG_LOOKUP_UAFILTER_FLAG) { \
-		tmp = *(ptr->user_agent.s+ptr->user_agent.len); \
-		*(ptr->user_agent.s+ptr->user_agent.len) = '\0'; \
 		if (regexec(&ua_re, ptr->user_agent.s, 1, &ua_match, 0)) { \
 			return; \
 		} \
-		*(ptr->user_agent.s+ptr->user_agent.len) = tmp; \
 	}
 
 unsigned int nbranches;
@@ -139,7 +136,7 @@ int lookup(struct sip_msg* _m, char* _t, char* _f, char* _s)
 					break;
 				case 'i': regexp_flags |= REG_ICASE; break;
 				case 'e': regexp_flags |= REG_EXTENDED; break;
-				default: LM_WARN("unsuported flag %c \n",flags_s.s[res]);
+				default: LM_WARN("unsupported flag %c \n",flags_s.s[res]);
 			}
 		}
 	}
@@ -507,7 +504,9 @@ int is_registered(struct sip_msg* _m, char *_d, char* _a)
 {
 	int ret=NOT_FOUND;
 	urecord_t* r;
+	ucontact_t *c;
 	udomain_t* ud = (udomain_t*)_d;
+	int_str istr;
 	str aor;
 
 	if (msg_aor_parse(_m, _a, &aor)) {
@@ -516,10 +515,24 @@ int is_registered(struct sip_msg* _m, char *_d, char* _a)
 	}
 
 	CHECK_DOMAIN(ud);
+	get_act_time();
 
+	LM_DBG("checking aor <%.*s>\n",aor.len,aor.s);
 	ul.lock_udomain(ud, &aor);
-	if (ul.get_urecord(ud, &aor, &r) == 0)
-		ret = IS_FOUND;
+	if (ul.get_urecord(ud, &aor, &r) == 0) {
+		for ( c=r->contacts; c && (ret==NOT_FOUND); c=c->next ) {
+			if (VALID_CONTACT(c,act_time)) {
+				/* populate the 'attributes' avp */
+				if (attr_avp_name != -1) {
+					istr.s = c->attr;
+					if (add_avp_last(AVP_VAL_STR, attr_avp_name, istr) != 0) {
+						LM_ERR("Failed to populate attr avp!\n");
+					}
+				}
+				ret = IS_FOUND;
+			}
+		}
+	}
 	ul.unlock_udomain(ud, &aor);
 
 	return ret;
@@ -738,14 +751,3 @@ out_unlock_found:
 #undef IS_FOUND
 #undef NOT_FOUND
 
-
-/*! \brief the registered() function
- * Return true if the AOR in the Request-URI is registered,
- * it is similar to lookup but registered neither rewrites
- * the Request-URI nor appends branches
- */
-int registered(struct sip_msg* _m, char* _t, char* _s, char *_c)
-{
-	LM_WARN("Deprecated! Use is_contact_registered() instead!\n");
-	return is_contact_registered(_m, _t, _s, NULL, _c);
-}

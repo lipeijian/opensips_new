@@ -29,7 +29,7 @@ Razvan Crainea
 
         1.4. Exported Functions
 
-              1.4.1.
+              1.4.1. python_exec(method_name [, extra_args])
 
    List of Examples
 
@@ -155,7 +155,7 @@ modparam("python", "child_init_method", "child_initializer")
 
 1.4. Exported Functions
 
-1.4.1.1.  python_exec(method_name [, extra_args])
+1.4.1.  python_exec(method_name [, extra_args])
 
    Thhis function is used to execute a method from the Python
    module loaded.

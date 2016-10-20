@@ -34,6 +34,7 @@
 #include "../../parser/parse_methods.h"
 #include "../../parser/parse_content.h"
 #include "../../parser/parse_authenticate.h"
+#include "../../parser/sdp/sdp.h"
 #include "../../locking.h"
 #include "../../script_cb.h"
 #include "../uac_auth/uac_auth.h"
@@ -257,7 +258,7 @@ str* b2b_htable_insert(b2b_table table, b2b_dlg_t* dlg, int hash_index, int src,
 	return b2b_key;
 }
 
-/* key format : B2B.hash_index.local_index *
+/* key format : B2B.hash_index.local_index.timestamp *
  */
 
 int b2b_parse_key(str* key, unsigned int* hash_index, unsigned int* local_index)
@@ -292,12 +293,20 @@ int b2b_parse_key(str* key, unsigned int* hash_index, unsigned int* local_index)
 
 	p++;
 	s.s = p;
-	s.len = key->s + key->len - s.s;
+	p= strchr(s.s, '.');
+	if(p == NULL || ((p-s.s) > key->len) )
+	{
+		LM_DBG("Wrong format for b2b key\n");
+		return -1;
+	}
+
+	s.len = p - s.s;
 	if(str2int(&s, local_index)< 0)
 	{
 		LM_DBG("Wrong format for b2b key\n");
 		return -1;
 	}
+	/* we do not really care about the third part of the key */
 
 	LM_DBG("hash_index = [%d]  - local_index= [%d]\n", *hash_index, *local_index);
 
@@ -310,7 +319,8 @@ str* b2b_generate_key(unsigned int hash_index, unsigned int local_index)
 	str* b2b_key;
 	int len;
 
-	len = sprintf(buf, "%s.%d.%d", b2b_key_prefix.s, hash_index, local_index);
+	len = sprintf(buf, "%s.%d.%d.%ld",
+		b2b_key_prefix.s, hash_index, local_index, startup_time+get_ticks());
 
 	b2b_key = (str*)pkg_malloc(sizeof(str)+ len);
 	if(b2b_key== NULL)
@@ -486,7 +496,6 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 	str param= {NULL,0};
 	b2b_table table = NULL;
 	int method_value;
-	static str reason = {"Trying", 6};
 	str from_tag;
 	str to_tag;
 	str callid;
@@ -861,15 +870,17 @@ logic_notify:
 						LM_DBG("Received another request when the previous "
 							"one was in process\n");
 						str text = str_init("Request Pending");
-						if(tmb.t_reply_with_body(dlg->uas_tran, 491,
+						if(tmb.t_reply_with_body( tm_tran, 491,
 						&text, 0, 0, &to_tag) < 0)
 						{
 							LM_ERR("failed to send reply with tm\n");
 						}
 						LM_DBG("Sent reply [491] and unreffed the cell %p\n",
-							dlg->uas_tran);
+							tm_tran);
 					}
-					tmb.unref_cell(dlg->uas_tran);
+					tmb.unref_cell(tm_tran); /* for t_newtran() */
+					lock_release(&table[hash_index].lock);
+					return SCB_DROP_MSG;
 				}
 				dlg->uas_tran = tm_tran;
 				LM_DBG("Saved uas_tran=[%p] for dlg[%p]\n", tm_tran, dlg);
@@ -882,12 +893,6 @@ logic_notify:
 
 			if(tm_tran && tm_tran!=T_UNDEFINED)
 				tmb.unref_cell(tm_tran);
-		}
-
-		/* send provisional reply 100 Trying */
-		if(method_value == METHOD_INVITE)
-		{
-			tmb.t_reply(msg, 100, &reason);
 		}
 	}
 
@@ -2888,7 +2893,6 @@ int b2b_apply_lumps(struct sip_msg* msg)
 {
 	str obuf;
 	struct sip_msg tmp;
-	str body;
 
 	/* faked reply */
 	if (msg==NULL || msg == FAKED_REPLY || msg==&dummy_msg)
@@ -2952,10 +2956,7 @@ int b2b_apply_lumps(struct sip_msg* msg)
 	if (parse_msg(msg->buf, msg->len, msg) != 0)
 		LM_ERR("parse_msg failed\n");
 
-	/* if has body, check for SDP */
-	if (get_body(msg,&body) != 0 || body.len == 0)
-		return 1;
-
+	/* check for SDP */
 	if (parse_sdp(msg) < 0) {
 		LM_DBG("failed to parse SDP message\n");
 		return -1;

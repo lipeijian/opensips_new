@@ -82,12 +82,14 @@ typedef struct _ds_dest
 	str description;
 	int flags;
 	unsigned short weight;
+	unsigned short rr_count; /* times it was chosen in a row for weighted round-robin */
 	unsigned short running_weight;
 	unsigned short active_running_weight;
 	unsigned short priority;
 	struct socket_info *sock;
 	struct ip_addr ips[DS_MAX_IPS]; /* IP-Address of the entry */
 	unsigned short int ports[DS_MAX_IPS]; /* Port of the request URI */
+	unsigned short int protos[DS_MAX_IPS]; /* Protocol of the request URI */
 	unsigned short ips_cnt;
 	unsigned short failure_count;
 	unsigned short chosen_count;
@@ -193,7 +195,6 @@ extern str ds_ping_from;
 extern int probing_threshhold; /* number of failed requests,
 						before a destination is taken into probing */
 extern int ds_probing_mode;
-
 
 int init_ds_db(ds_partition_t *partition);
 int ds_connect_db(ds_partition_t *partition);

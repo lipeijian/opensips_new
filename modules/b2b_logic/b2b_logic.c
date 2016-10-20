@@ -48,7 +48,7 @@
 #include "b2b_load.h"
 #include "b2bl_db.h"
 
-#define TABLE_VERSION 2
+#define TABLE_VERSION 3
 
 /** Functions declarations */
 static int mod_init(void);
@@ -574,13 +574,13 @@ static int load_scenario(b2b_scenario_t** scenario_list,char* filename)
 			body_type = (char *)xmlNodeGetAttrContentByName(body_node, "type");
 			if (body_type == NULL)
 			{
-				LM_ERR("Bad formated scenario document. Empty body content type\n");
+				LM_ERR("Bad formatted scenario document. Empty body content type\n");
 				goto error;
 			}
 			body_content = (char*)xmlNodeGetContent(body_node);
 			if(body_content == NULL)
 			{
-				LM_ERR("Bad formated scenario document. Empty body\n");
+				LM_ERR("Bad formatted scenario document. Empty body\n");
 				xmlFree(body_type);
 				goto error;
 			}

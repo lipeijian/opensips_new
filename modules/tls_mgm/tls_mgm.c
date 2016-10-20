@@ -3,6 +3,9 @@
 #include <openssl/opensslv.h>
 #include <openssl/err.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/tcp.h>
 #include <netinet/ip.h>
@@ -32,7 +35,7 @@
 #include "tls.h"
 #include "api.h"
 
-#define DB_CAP DB_CAP_QUERY | DB_CAP_UPDATE 
+#define DB_CAP DB_CAP_QUERY | DB_CAP_UPDATE
 #define len(s)	s == NULL?0:strlen(s)
 
 #define check_val( _col, _val, _type, _not_null, _is_empty_str) \
@@ -116,13 +119,13 @@ static param_export_t params[] = {
 static cmd_export_t cmds[] = {
 	{"is_peer_verified", (cmd_function)is_peer_verified,   0, 0, 0,
 		REQUEST_ROUTE},
-	{"load_tls_mgm", (cmd_function)load_tls_mgm,   0, 0, 0, 0},	
+	{"load_tls_mgm", (cmd_function)load_tls_mgm,   0, 0, 0, 0},
 	{0,0,0,0,0,0}
 };
 
 /*
  * Exported MI functions
- */	
+ */
 static mi_export_t mi_cmds[] = {
 	{ "tls_reload", "reloads stored data from the database", tls_reload, 0, 0, 0},
 	{ "tls_list", "lists all domains", tls_list, 0, 0, 0},
@@ -346,7 +349,7 @@ set_dh_params(SSL_CTX * ctx, char *filename)
 	}
 
 	DH_free(dh);
-	LM_DBG("DH params from '%s' successfuly set\n", filename);
+	LM_DBG("DH params from '%s' successfully set\n", filename);
 	return 0;
 }
 
@@ -499,7 +502,7 @@ int load_info(db_func_t *dr_dbf, db_con_t* db_hdl, str *db_table,
 			str_vals[STR_VALS_ECCURVE_COL] = (char *) VAL_STRING(ROW_VALUES(row) + 14);
 
 			tlsp_db_add_domain(str_vals, int_vals, serv_dom, cli_dom);
-			
+
 			n++;
 		}
 
@@ -775,7 +778,7 @@ static int load_certificate(SSL_CTX * ctx, char *filename)
 		return -1;
 	}
 
-	LM_DBG("'%s' successfuly loaded\n", filename);
+	LM_DBG("'%s' successfully loaded\n", filename);
 	return 0;
 }
 
@@ -881,7 +884,7 @@ static int load_ca(SSL_CTX * ctx, char *filename)
 		return -1;
 	}
 
-	LM_DBG("CA '%s' successfuly loaded\n", filename);
+	LM_DBG("CA '%s' successfully loaded\n", filename);
 	return 0;
 }
 
@@ -896,7 +899,7 @@ static int load_ca_dir(SSL_CTX * ctx, char *directory)
 		return -1;
 	}
 
-	LM_DBG("CA '%s' successfuly loaded from directory\n", directory);
+	LM_DBG("CA '%s' successfully loaded from directory\n", directory);
 	return 0;
 }
 
@@ -959,7 +962,7 @@ static int load_private_key(SSL_CTX * ctx, char *filename)
 		return -1;
 	}
 
-	LM_DBG("key '%s' successfuly loaded\n", filename);
+	LM_DBG("key '%s' successfully loaded\n", filename);
 	return 0;
 }
 
@@ -1001,7 +1004,7 @@ static int init_tls_domains(struct tls_domain *d)
 		}
 		if (init_ssl_ctx_behavior( d ) < 0)
 			return -1;
-		
+
 		/*
 		 * load certificate
 		 */
@@ -1270,7 +1273,17 @@ static int mod_init(void){
 	 * CRYPTO_malloc will set allow_customize in openssl to 0
 	 */
 	if (!CRYPTO_set_mem_functions(os_malloc, os_realloc, os_free)) {
+		void *(*m) (size_t);
+		void *(*r) (void *, size_t);
+		void (*f) (void *);
 		LM_ERR("unable to set the memory allocation functions\n");
+		LM_ERR("NOTE: check if you have openssl 1.0.1e-fips, as this "
+			"version is known to be broken; if so, you need to upgrade or "
+			"downgrade to a different openssl version !!\n");
+		CRYPTO_get_mem_functions(&m, &r, &f);
+		LM_ERR("extra: malloc=%p/%p realloc=%p/%p free=%p/%p version=%s\n",
+				os_malloc, m, os_realloc, r, os_free, f,
+				SSLeay_version(SSLEAY_VERSION));
 		return -1;
 	}
 
@@ -1335,9 +1348,9 @@ static int mod_init(void){
 	/*
 	 * now initialize tls virtual domains
 	 */
-	
-	if (tls_db_enabled && load_info(&dr_dbf, db_hdl, &tls_db_table, &tls_server_domains,
-			&tls_client_domains)){
+
+	if (tls_db_enabled && load_info(&dr_dbf, db_hdl, &tls_db_table,
+			&tls_server_domains, &tls_client_domains)){
 		return -1;
 	}
 
@@ -1420,7 +1433,7 @@ static int is_peer_verified(struct sip_msg* msg, char* foo, char* foo2)
 	   connection 1: localIP1:localPort1 <--> remoteIP:remotePort
 	   connection 2: localIP2:localPort2 <--> remoteIP:remotePort
 	   but I think the is very unrealistic */
-	tcp_conn_get(0, &(msg->rcv.src_ip), msg->rcv.src_port, &c, NULL/*fd*/);
+	tcp_conn_get(0, &(msg->rcv.src_ip), msg->rcv.src_port, PROTO_TLS, &c, NULL/*fd*/);
 	if (c==NULL) {
 		LM_ERR("no corresponding TLS/TCP connection found."
 				" This should not happen... return -1\n");
@@ -1457,7 +1470,7 @@ static int is_peer_verified(struct sip_msg* msg, char* foo, char* foo2)
 
 	tcp_conn_release(c, 0);
 
-	LM_DBG("tlsops:is_peer_verified: peer is successfuly verified"
+	LM_DBG("tlsops:is_peer_verified: peer is successfully verified"
 			"...done\n");
 	return 1;
 error:
@@ -1600,7 +1613,8 @@ static struct mi_root * tls_list(struct mi_root *cmd_tree, void *param)
 		return NULL;
 	}
 
-	lock_start_read(dom_lock);
+	if (dom_lock)
+		lock_start_read(dom_lock);
 
 	root = &rpl_tree->node;
 
@@ -1610,11 +1624,13 @@ static struct mi_root * tls_list(struct mi_root *cmd_tree, void *param)
 	if (list_domain(root, tls_server_domains) < 0)
 		goto error;
 
-	lock_stop_read(dom_lock);
+	if (dom_lock)
+		lock_stop_read(dom_lock);
 
 	return rpl_tree;
 error:
-	lock_stop_read(dom_lock);
+	if (dom_lock)
+		lock_stop_read(dom_lock);
 	if (rpl_tree) free_mi_tree(rpl_tree);
 	return NULL;
 }

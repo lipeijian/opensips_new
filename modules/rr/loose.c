@@ -57,7 +57,7 @@
 #include "api.h"
 
 
-#define RR_ERROR -1       /* An error occured while processing route set */
+#define RR_ERROR -1       /* An error occurred while processing route set */
 #define RR_DRIVEN 1       /* The next hop is determined from the route set */
 #define NOT_RR_DRIVEN -1  /* The next hop is not determined from the route set */
 
@@ -224,14 +224,18 @@ static inline int is_2rr(str* _params)
  * Check if URI is myself
  */
 #ifdef ENABLE_USER_CHECK
-static inline int is_myself(str *_user, str* _host, unsigned short _port)
+static inline int is_myself(str *_user, struct sip_uri* _uri)
 #else
-static inline int is_myself(str* _host, unsigned short _port)
+static inline int is_myself(struct sip_uri* _uri)
 #endif
 {
 	int ret;
+	unsigned short port;
+	unsigned short proto;
 
-	ret = check_self(_host, _port ? _port : SIP_PORT, 0);/* match all protos*/
+	port = get_uri_port(_uri, &proto);
+
+	ret = check_self(&_uri->host, port, proto);
 	if (ret < 0) return 0;
 
 #ifdef ENABLE_USER_CHECK
@@ -509,9 +513,9 @@ static inline int after_strict(struct sip_msg* _m)
 
 	if ( enable_double_rr && is_2rr(&puri.params) &&
 #ifdef ENABLE_USER_CHECK
-	is_myself(&puri.user, &puri.host, puri.port_no)
+	is_myself(&puri.user, &puri)
 #else
-	is_myself(&puri.host, puri.port_no)
+	is_myself(&puri)
 #endif
 	) {
 		/* double route may occure due different IP and port, so force as
@@ -718,10 +722,10 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 
 	/* IF the URI was added by me, remove it */
 #ifdef ENABLE_USER_CHECK
-	ret=is_myself(&puri.user, &puri.host, puri.port_no);
+	ret=is_myself(&puri.user, &puri);
 	if (ret>0)
 #else
-	if (is_myself(&puri.host, puri.port_no))
+	if (is_myself(&puri))
 #endif
 	{
 		LM_DBG("Topmost route URI: '%.*s' is me\n",
@@ -899,10 +903,9 @@ int loose_route(struct sip_msg* _m)
 		return after_loose(_m, 1);
 	} else {
 #ifdef ENABLE_USER_CHECK
-		if (is_myself(&_m->parsed_uri.user, &_m->parsed_uri.host,
-		_m->parsed_uri.port_no) && !(_m->parsed_uri.gr.s && _m->parsed_uri.gr.len)) {
+		if (is_myself(&_m->parsed_uri.user, &_m->parsed_uri) && !(_m->parsed_uri.gr.s && _m->parsed_uri.gr.len)) {
 #else
-		if (is_myself(&_m->parsed_uri.host, _m->parsed_uri.port_no) && !(_m->parsed_uri.gr.s && _m->parsed_uri.gr.len)) {
+		if (is_myself(&_m->parsed_uri) && !(_m->parsed_uri.gr.s && _m->parsed_uri.gr.len)) {
 #endif
 			return after_strict(_m);
 		} else {
@@ -918,7 +921,8 @@ int get_route_params(struct sip_msg *msg, str *val)
 		return -1;
 
 	/* check if params are present */
-	if ( (val=ctx_rrparam_get())==NULL )
+	*val = *ctx_rrparam_get();
+	if (val->s==NULL || val->len==0)
 		return -1;
 
 	return 0;
@@ -933,7 +937,8 @@ int check_route_param(struct sip_msg * msg, regex_t* re)
 	str *rparams;
 
 	/* check if params are present */
-	if ( (rparams=ctx_rrparam_get())==NULL || rparams->len==0)
+	rparams = ctx_rrparam_get();
+	if (rparams->s==NULL || rparams->len==0)
 		return -1;
 
 	/* include also the first ';' */
@@ -963,7 +968,8 @@ int get_route_param( struct sip_msg *msg, str *name, str *val)
 	str *rparams;
 
 	/* check if params are present */
-	if ( (rparams=ctx_rrparam_get())==NULL || rparams->len==0)
+	rparams = ctx_rrparam_get();
+	if (rparams->s==NULL || rparams->len==0)
 		goto notfound;
 
 	end = rparams->s + rparams->len;

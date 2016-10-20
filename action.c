@@ -190,7 +190,6 @@ int run_action_list(struct action* a, struct sip_msg* msg)
 
 int run_top_route(struct action* a, struct sip_msg* msg)
 {
-	static unsigned int bl_last_msg_id = 0;
 	int bk_action_flags;
 	int bk_rec_lev;
 	int ret;
@@ -201,13 +200,6 @@ int run_top_route(struct action* a, struct sip_msg* msg)
 	action_flags = 0;
 	rec_lev = 0;
 	init_err_info();
-
-	if (bl_last_msg_id != msg->id) {
-		bl_last_msg_id = msg->id;
-		reset_bl_markers();
-	}
-
-	resetsflag( (unsigned int)-1 );
 
 	run_actions(a, msg);
 	ret = action_flags;
@@ -682,14 +674,6 @@ int do_action(struct action* a, struct sip_msg* msg)
 			}
 			ret = (msg->len >= (unsigned int)a->elem[0].u.number) ? 1 : -1;
 			break;
-		case SET_DEBUG_T:
-			script_trace("core", "set_debug", msg, a->file, a->line) ;
-			if (a->elem[0].type==NUMBER_ST)
-				set_proc_debug_level(a->elem[0].u.number);
-			else
-				reset_proc_debug_level();
-			ret = 1;
-			break;
 		case SETFLAG_T:
 			script_trace("core", "setflag", msg, a->file, a->line) ;
 			ret = setflag( msg, a->elem[0].u.number );
@@ -701,18 +685,6 @@ int do_action(struct action* a, struct sip_msg* msg)
 		case ISFLAGSET_T:
 			script_trace("core", "isflagset", msg, a->file, a->line) ;
 			ret = isflagset( msg, a->elem[0].u.number );
-			break;
-		case SETSFLAG_T:
-			script_trace("core", "setsflag", msg, a->file, a->line) ;
-			ret = setsflag( a->elem[0].u.number );
-			break;
-		case RESETSFLAG_T:
-			script_trace("core", "resetsflag", msg, a->file, a->line) ;
-			ret = resetsflag( a->elem[0].u.number );
-			break;
-		case ISSFLAGSET_T:
-			script_trace("core", "issflagset", msg, a->file, a->line) ;
-			ret = issflagset( a->elem[0].u.number );
 			break;
 		case SETBFLAG_T:
 			script_trace("core", "setbflag", msg, a->file, a->line) ;
@@ -1882,13 +1854,13 @@ next_avp:
 			/* first param - an ACTIONS_ST containing an ACMD_ST
 			 * second param - a NUMBER_ST pointing to resume route */
 			aitem = (struct action *)(a->elem[0].u.data);
-			if (async_start_f==NULL || a->elem[0].type!=ACTIONS_ST ||
+			if (async_script_start_f==NULL || a->elem[0].type!=ACTIONS_ST ||
 			a->elem[1].type!=NUMBER_ST || aitem->type!=AMODULE_T) {
 				LM_ALERT("BUG in async expression\n");
 			} else {
 				script_trace("async", ((acmd_export_t*)(aitem->elem[0].u.data))->name,
 					msg, a->file, a->line) ;
-				ret = async_start_f( msg, aitem, a->elem[1].u.number);
+				ret = async_script_start_f( msg, aitem, a->elem[1].u.number);
 				if (ret>=0)
 					action_flags |= ACT_FL_TBCONT;
 			}

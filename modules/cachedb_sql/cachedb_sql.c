@@ -450,8 +450,8 @@ static int dbcache_fetch_counter(cachedb_con *con,str *attr,int *ret_val)
 		case DB_INT:
 			if (ret_val)
 				*ret_val = RES_ROWS(db_res)[0].values[0].val.int_val;
-				if (CACHEDBSQL_FUNC(con).free_result(CACHEDBSQL_CON(con), db_res) < 0)
-					LM_ERR("failed to freeing result of query\n");
+			if (CACHEDBSQL_FUNC(con).free_result(CACHEDBSQL_CON(con), db_res) < 0)
+				LM_ERR("failed to freeing result of query\n");
 			break;
 		default:
 			LM_ERR("unknown type of DB user column\n");
@@ -535,7 +535,7 @@ static int mod_init(void)
 	cde.cdb_func.capability = 0;
 
 	if(cache_clean_period <= 0) {
-			LM_ERR("wrong parameter cache_clean_period - need a postive value\n");
+			LM_ERR("wrong parameter cache_clean_period - need a positive value\n");
 			return -1;
 	}
 

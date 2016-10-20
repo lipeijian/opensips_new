@@ -183,4 +183,11 @@ Updated to support CNAM.
 2015 September 15
 Updated to support CNAM diversion use case.
 
+2016 February 26
+Updated to support STIR.
+
+2016 September 13
+Added SUBSCRIBE/NOTIFY CNAM support.
+Formatted sample configuration file.
+Updated for OSP Toolkit 4.12.0
 

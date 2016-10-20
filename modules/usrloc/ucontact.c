@@ -116,7 +116,9 @@ new_ucontact(str* _dom, str* _aor, str* _contact, ucontact_info_t* _ci)
 
 	if (shm_str_dup( &c->c, _contact) < 0) goto mem_error;
 	if (shm_str_dup( &c->callid, _ci->callid) < 0) goto mem_error;
-	if (shm_str_dup( &c->user_agent, _ci->user_agent) < 0) goto mem_error;
+
+	/* an additional null byte may be needed by "regexec" later on */
+	if (shm_nt_str_dup( &c->user_agent, _ci->user_agent) < 0) goto mem_error;
 
 	if (_ci->received.s && _ci->received.len) {
 		if (shm_str_dup( &c->received, &_ci->received) < 0) goto mem_error;
@@ -250,10 +252,11 @@ void print_ucontact(FILE* _f, ucontact_t* _c)
  */
 int mem_update_ucontact(ucontact_t* _c, ucontact_info_t* _ci)
 {
-#define update_str(_old,_new) \
+	/* "user_agent" must be null-terminated (see e5cb9805b) */
+#define update_str(_old,_new,_nt) \
 	do{\
 		if ((_old)->len < (_new)->len) { \
-			ptr = (char*)shm_malloc((_new)->len); \
+			ptr = shm_malloc((_new)->len + ((_nt) ? 1 : 0)); \
 			if (ptr == 0) { \
 				LM_ERR("no more shm memory\n"); \
 				return -1; \
@@ -265,6 +268,8 @@ int mem_update_ucontact(ucontact_t* _c, ucontact_info_t* _ci)
 			memcpy((_old)->s, (_new)->s, (_new)->len);\
 		}\
 		(_old)->len = (_new)->len;\
+		if (_nt) \
+			(_old)->s[(_old)->len] = '\0'; \
 	} while(0)
 
 	char* ptr;
@@ -273,12 +278,12 @@ int mem_update_ucontact(ucontact_t* _c, ucontact_info_t* _ci)
 	 * the same Call-ID header field value for registrations sent
 	 * to a particular registrar.', but it is not a 'MUST'. So
 	 * always update the call ID to be safe. */
-	update_str( &_c->callid, _ci->callid);
+	update_str( &_c->callid, _ci->callid, 0);
 
-	update_str( &_c->user_agent, _ci->user_agent);
+	update_str( &_c->user_agent, _ci->user_agent, 1);
 
 	if (_ci->received.s && _ci->received.len) {
-		update_str( &_c->received, &_ci->received);
+		update_str( &_c->received, &_ci->received, 0);
 	} else {
 		if (_c->received.s) shm_free(_c->received.s);
 		_c->received.s = 0;
@@ -286,7 +291,7 @@ int mem_update_ucontact(ucontact_t* _c, ucontact_info_t* _ci)
 	}
 
 	if (_ci->path) {
-		update_str( &_c->path, _ci->path);
+		update_str( &_c->path, _ci->path, 0);
 	} else {
 		if (_c->path.s) shm_free(_c->path.s);
 		_c->path.s = 0;
@@ -294,7 +299,7 @@ int mem_update_ucontact(ucontact_t* _c, ucontact_info_t* _ci)
 	}
 
 	if (_ci->attr && _ci->attr->s && _ci->attr->len) {
-		update_str( &_c->attr, _ci->attr);
+		update_str( &_c->attr, _ci->attr, 0);
 	} else {
 		if (_c->attr.s) shm_free(_c->attr.s);
 		_c->attr.s = 0;
@@ -508,47 +513,39 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 	keys[16] = &attr_col;
 	keys[17] = &domain_col;
 
+	memset(vals, 0, sizeof vals);
+
 	vals[0].type = DB_BIGINT;
 	vals[0].val.bigint_val = _c->contact_id;
-	vals[0].nul = 0;
 
 	vals[1].type = DB_STR;
-	vals[1].nul = 0;
 	vals[1].val.str_val.s = _c->aor->s;
 	vals[1].val.str_val.len = _c->aor->len;
 
 	vals[2].type = DB_STR;
-	vals[2].nul = 0;
 	vals[2].val.str_val.s = _c->c.s;
 	vals[2].val.str_val.len = _c->c.len;
 
 	vals[3].type = DB_DATETIME;
-	vals[3].nul = 0;
 	vals[3].val.time_val = _c->expires;
 
 	vals[4].type = DB_DOUBLE;
-	vals[4].nul = 0;
 	vals[4].val.double_val = q2double(_c->q);
 
 	vals[5].type = DB_STR;
-	vals[5].nul = 0;
 	vals[5].val.str_val.s = _c->callid.s;
 	vals[5].val.str_val.len = _c->callid.len;
 
 	vals[6].type = DB_INT;
-	vals[6].nul = 0;
 	vals[6].val.int_val = _c->cseq;
 
 	vals[7].type = DB_INT;
-	vals[7].nul = 0;
 	vals[7].val.bitmap_val = _c->flags;
 
 	vals[8].type = DB_STR;
-	vals[8].nul = 0;
 	vals[8].val.str_val = bitmask_to_flag_list(FLAG_TYPE_BRANCH, _c->cflags);
 
 	vals[9].type = DB_STR;
-	vals[9].nul = 0;
 	vals[9].val.str_val.s = _c->user_agent.s;
 	vals[9].val.str_val.len = _c->user_agent.len;
 
@@ -556,7 +553,6 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 	if (_c->received.s == 0) {
 		vals[10].nul = 1;
 	} else {
-		vals[10].nul = 0;
 		vals[10].val.str_val.s = _c->received.s;
 		vals[10].val.str_val.len = _c->received.len;
 	}
@@ -565,7 +561,6 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 	if (_c->path.s == 0) {
 		vals[11].nul = 1;
 	} else {
-		vals[11].nul = 0;
 		vals[11].val.str_val.s = _c->path.s;
 		vals[11].val.str_val.len = _c->path.len;
 	}
@@ -574,7 +569,6 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 	if (_c->sock) {
 		vals[12].val.str_val =  _c->sock->adv_sock_str.len ?
 								_c->sock->adv_sock_str:  _c->sock->sock_str;
-		vals[12].nul = 0;
 	} else {
 		vals[12].nul = 1;
 	}
@@ -584,18 +578,15 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 		vals[13].nul = 1;
 	} else {
 		vals[13].val.bitmap_val = _c->methods;
-		vals[13].nul = 0;
 	}
 
 	vals[14].type = DB_DATETIME;
-	vals[14].nul = 0;
 	vals[14].val.time_val = _c->last_modified;
 
 	vals[15].type = DB_STR;
 	if (_c->instance.s == 0) {
 		vals[15].nul = 1;
 	} else {
-		vals[15].nul = 0;
 		vals[15].val.str_val.s = _c->instance.s;
 		vals[15].val.str_val.len = _c->instance.len;
 	}
@@ -604,14 +595,12 @@ int db_insert_ucontact(ucontact_t* _c,query_list_t **ins_list, int update)
 	if (_c->attr.s == 0) {
 		vals[16].nul = 1;
 	} else {
-		vals[16].nul = 0;
 		vals[16].val.str_val.s = _c->attr.s;
 		vals[16].val.str_val.len = _c->attr.len;
 	}
 
 	if (use_domain) {
 		vals[17].type = DB_STR;
-		vals[17].nul = 0;
 
 		dom = q_memchr(_c->aor->s, '@', _c->aor->len);
 		if (dom==0) {
@@ -673,6 +662,8 @@ int db_update_ucontact(ucontact_t* _c)
 		return 0;
 	}
 
+	memset(vals1, 0, sizeof vals1);
+
 	keys1[0] = &contactid_col;
 	vals1[0].type = DB_BIGINT;
 	vals1[0].val.bigint_val = _c->contact_id;
@@ -690,35 +681,30 @@ int db_update_ucontact(ucontact_t* _c)
 	keys2[10] = &last_mod_col;
 	keys2[11] = &attr_col;
 
+	memset(vals2, 0, sizeof vals2);
+
 	vals2[0].type = DB_DATETIME;
-	vals2[0].nul = 0;
 	vals2[0].val.time_val = _c->expires;
 
 	vals2[1].type = DB_DOUBLE;
-	vals2[1].nul = 0;
 	vals2[1].val.double_val = q2double(_c->q);
 
 	vals2[2].type = DB_INT;
-	vals2[2].nul = 0;
 	vals2[2].val.int_val = _c->cseq;
 
 	vals2[3].type = DB_BITMAP;
-	vals2[3].nul = 0;
 	vals2[3].val.bitmap_val = _c->flags;
 
 	vals2[4].type = DB_STR;
-	vals2[4].nul = 0;
 	vals2[4].val.str_val = bitmask_to_flag_list(FLAG_TYPE_BRANCH, _c->cflags);
 
 	vals2[5].type = DB_STR;
-	vals2[5].nul = 0;
 	vals2[5].val.str_val = _c->user_agent;
 
 	vals2[6].type = DB_STR;
 	if (_c->received.s == 0) {
 		vals2[6].nul = 1;
 	} else {
-		vals2[6].nul = 0;
 		vals2[6].val.str_val = _c->received;
 	}
 
@@ -726,7 +712,6 @@ int db_update_ucontact(ucontact_t* _c)
 	if (_c->path.s == 0) {
 		vals2[7].nul = 1;
 	} else {
-		vals2[7].nul = 0;
 		vals2[7].val.str_val = _c->path;
 	}
 
@@ -734,7 +719,6 @@ int db_update_ucontact(ucontact_t* _c)
 	if (_c->sock) {
 		vals2[8].val.str_val = _c->sock->adv_sock_str.len ?
 								_c->sock->adv_sock_str:  _c->sock->sock_str;
-		vals2[8].nul = 0;
 	} else {
 		vals2[8].nul = 1;
 	}
@@ -744,18 +728,15 @@ int db_update_ucontact(ucontact_t* _c)
 		vals2[9].nul = 1;
 	} else {
 		vals2[9].val.bitmap_val = _c->methods;
-		vals2[9].nul = 0;
 	}
 
 	vals2[10].type = DB_DATETIME;
-	vals2[10].nul = 0;
 	vals2[10].val.time_val = _c->last_modified;
 
 	vals2[11].type = DB_STR;
 	if (_c->attr.s == 0) {
 		vals2[11].nul = 1;
 	} else {
-		vals2[11].nul = 0;
 		vals2[11].val.str_val = _c->attr;
 	}
 	keys2_no = 12;

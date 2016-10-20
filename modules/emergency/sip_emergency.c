@@ -508,7 +508,7 @@ int check_event_header(struct sip_msg *msg) {
 
 
 // get ip address of opensips server in port that receive INVITE
-int get_ip_socket(struct sip_msg *msg, char** s_addr){
+int get_ip_socket(struct sip_msg *msg, char** saddr){
 
 	char *socket;
 	struct socket_info** list;
@@ -521,7 +521,7 @@ int get_ip_socket(struct sip_msg *msg, char** s_addr){
 	}
 
 	si = *list;
-	*s_addr = NULL;
+	*saddr = NULL;
 
 	while (si) {
 		if (si->port_no == msg->rcv.dst_port) {
@@ -531,7 +531,7 @@ int get_ip_socket(struct sip_msg *msg, char** s_addr){
 				return -1;
 			}
 
-			*s_addr = socket;
+			*saddr = socket;
 			*socket = '@';
 			socket++;
 			memcpy(socket, si->address_str.s, si->address_str.len);
@@ -542,12 +542,12 @@ int get_ip_socket(struct sip_msg *msg, char** s_addr){
 			socket = socket + si->port_no_str.len;
 			*socket = 0;
 
-			LM_DBG(" --- SERVER = %s \n \n", *s_addr);
+			LM_DBG(" --- SERVER = %s \n \n", *saddr);
 			break;
 		}
 		si = si->next;
 	}
-	if (*s_addr == NULL) {
+	if (*saddr == NULL) {
 		LM_ERR("failed in found ip listen\n");
 		return -1;
 	}
@@ -881,8 +881,7 @@ end:
  */
 int find_body_pidf(struct sip_msg *msg, char** pidf_body) {
 
-	struct part* mbody_part;
-	struct multi_body *mbody;
+	struct body_part* mbody_part;
 	char *body_start, *body_end;
 	char *body_aux;
 	int size_body = 0;
@@ -890,14 +889,13 @@ int find_body_pidf(struct sip_msg *msg, char** pidf_body) {
 	UNUSED(cont);
 
 	LM_DBG(" --- FIND PIDF BODY \n \n");
-	mbody = get_all_bodies(msg);
-	if (mbody == NULL) {
+	if ( parse_sip_body(msg)<0 || msg->body==NULL) {
 		LM_ERR("Failed to get bodies\n");
 		return -1;
 	}
 
 
-	mbody_part = mbody->first;
+	mbody_part = &msg->body->first;
 	while (mbody_part != NULL) {
 		LM_DBG(" --- PIDF BODY %.*s", mbody_part->body.len, mbody_part->body.s);
 		LM_DBG(" --- PIDF BODY COUNT %d", ++cont);

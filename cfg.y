@@ -125,7 +125,7 @@ extern int yylex();
 static void yyerror(char* s);
 static void yyerrorf(char* fmt, ...);
 static char* tmp;
-static int i_tmp;
+static int i_tmp, rc;
 static void* cmd_tmp;
 static struct socket_id* lst_tmp;
 static int rt;  /* Type of route block for find_export */
@@ -271,16 +271,12 @@ static struct multi_str *tmp_mod;
 %token USE_BLACKLIST
 %token UNUSE_BLACKLIST
 %token MAX_LEN
-%token SETDEBUG
 %token SETFLAG
 %token RESETFLAG
 %token ISFLAGSET
 %token SETBFLAG
 %token RESETBFLAG
 %token ISBFLAGSET
-%token SETSFLAG
-%token RESETSFLAG
-%token ISSFLAGSET
 %token METHOD
 %token URI
 %token FROM_URI
@@ -313,10 +309,12 @@ static struct multi_str *tmp_mod;
 %token SCRIPT_TRACE
 
 /* config vars. */
+%token FORK
+%token DEBUG_MODE
 %token DEBUG
 %token ENABLE_ASSERTS
 %token ABORT_ON_ASSERT
-%token FORK
+%token LOGLEVEL
 %token LOGSTDERROR
 %token LOGFACILITY
 %token LOGNAME
@@ -571,8 +569,13 @@ phostport: proto COLON listen_id	{ $$=mk_listen_id($3, $1, 0); }
 			| proto COLON listen_id COLON port	{ $$=mk_listen_id($3, $1, $5);}
 			| proto COLON listen_id COLON error {
 				$$=0;
-				yyerror(" port number expected");
+				yyerror("port number expected");
+				YYABORT;
 				}
+			| NUMBER error { $$=0;
+				yyerror("protocol expected");
+				YYABORT;
+			}
 			;
 
 alias_def:	listen_id						{ $$=mk_listen_id($1, PROTO_NONE, 0); }
@@ -638,31 +641,37 @@ blst_elem_list: blst_elem_list COMMA blst_elem {}
 		;
 
 
-assign_stm: DEBUG EQUAL snumber {
-					*debug=$3;
+assign_stm: DEBUG EQUAL snumber
+			{ yyerror("\'debug\' is deprecated, use \'log_level\' instead\n");}
+		| FORK EQUAL NUMBER
+			{yyerror("fork is deprecated, use debug_mode\n");}
+		| LOGLEVEL EQUAL snumber {
+			/* in debug mode, force logging to DEBUG level*/
+			*log_level = debug_mode?L_DBG:$3;
 			}
-		| DEBUG EQUAL error  { yyerror("number  expected"); }
 		| ENABLE_ASSERTS EQUAL NUMBER  { enable_asserts=$3; }
 		| ENABLE_ASSERTS EQUAL error  { yyerror("boolean value expected"); }
 		| ABORT_ON_ASSERT EQUAL NUMBER  { abort_on_assert=$3; }
 		| ABORT_ON_ASSERT EQUAL error  { yyerror("boolean value expected"); }
-		| FORK  EQUAL NUMBER { dont_fork= !dont_fork ? ! $3:1; }
-		| FORK  EQUAL error  { yyerror("boolean value expected"); }
-		| LOGSTDERROR EQUAL NUMBER { if (!config_check) log_stderr=$3; }
+		| DEBUG_MODE EQUAL NUMBER  { debug_mode=$3;
+			if (debug_mode) { *log_level = L_DBG;log_stderr=1;}
+			}
+		| DEBUG_MODE EQUAL error
+			{ yyerror("boolean value expected for debug_mode"); }
+		| LOGSTDERROR EQUAL NUMBER 
+			/* in config-check or debug mode we force logging 
+			 * to standard error */
+			{ if (!config_check && !debug_mode) log_stderr=$3; }
 		| LOGSTDERROR EQUAL error { yyerror("boolean value expected"); }
 		| LOGFACILITY EQUAL ID {
-					if ( (i_tmp=str2facility($3))==-1)
-						yyerror("bad facility (see syslog(3) man page)");
-					if (!config_check)
-						log_facility=i_tmp;
-									}
+			if ( (i_tmp=str2facility($3))==-1)
+				yyerror("bad facility (see syslog(3) man page)");
+			if (!config_check)
+				log_facility=i_tmp;
+			}
 		| LOGFACILITY EQUAL error { yyerror("ID expected"); }
 		| LOGNAME EQUAL STRING { log_name=$3; }
 		| LOGNAME EQUAL error { yyerror("string value expected"); }
-		| AVP_ALIASES EQUAL STRING {
-				yyerror("AVP_ALIASES shouldn't be used anymore\n");
-			}
-		| AVP_ALIASES EQUAL error { yyerror("string value expected"); }
 		| DNS EQUAL NUMBER   { received_dns|= ($3)?DO_DNS:0; }
 		| DNS EQUAL error { yyerror("boolean value expected"); }
 		| REV_DNS EQUAL NUMBER { received_dns|= ($3)?DO_REV_DNS:0; }
@@ -732,9 +741,9 @@ assign_stm: DEBUG EQUAL snumber {
 			#endif
 			}
 		| MEM_WARMING_PERCENTAGE EQUAL error { yyerror("number expected"); }
-		| MEMLOG EQUAL NUMBER { memlog=$3; memdump=$3; }
+		| MEMLOG EQUAL snumber { memlog=$3; memdump=$3; }
 		| MEMLOG EQUAL error { yyerror("int value expected"); }
-		| MEMDUMP EQUAL NUMBER { memdump=$3; }
+		| MEMDUMP EQUAL snumber { memdump=$3; }
 		| MEMDUMP EQUAL error { yyerror("int value expected"); }
 		| EXECMSGTHRESHOLD EQUAL NUMBER { execmsgthreshold=$3; }
 		| EXECMSGTHRESHOLD EQUAL error { yyerror("int value expected"); }
@@ -755,10 +764,16 @@ assign_stm: DEBUG EQUAL snumber {
 		| EVENT_SHM_THRESHOLD EQUAL error { yyerror("int value expected"); }
 		| EVENT_PKG_THRESHOLD EQUAL NUMBER {
 			#ifdef STATISTICS
+			#ifdef USE_SHM_MEM
+				warn("No PKG memory, all allocations are mapped to SHM; "
+					"Use event_shm_threshold instead or recompile with PKG_MALLOC "
+					"instead of USE_SHM_MEM in order to have separate PKG memory");
+			#else
 			if ($3 < 0 || $3 > 100)
 				yyerror("PKG threshold has to be a percentage between "
 					"0 and 100");
 			event_pkg_threshold=$3;
+			#endif
 			#else
 			yyerror("statistics support not compiled in");
 			#endif
@@ -1047,12 +1062,12 @@ assign_stm: DEBUG EQUAL snumber {
 		| DST_BLACKLIST EQUAL ID COLON LBRACE blst_elem_list RBRACE {
 				s_tmp.s = $3;
 				s_tmp.len = strlen($3);
-				if ( create_bl_head( BL_CORE_ID, BL_READONLY_LIST,
-				bl_head, bl_tail, &s_tmp)==0) {
+				if (create_bl_head( BL_CORE_ID, BL_READONLY_LIST,
+				    bl_head, bl_tail, &s_tmp)==0) {
 					yyerror("failed to create blacklist\n");
 					YYABORT;
 				}
-				bl_head = bl_tail = 0;
+				bl_head = bl_tail = NULL;
 				}
 		| DISABLE_STATELESS_FWD EQUAL NUMBER {
 				sl_fwd_disabled=$3;
@@ -2085,11 +2100,6 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 		| LOG_TOK error { $$=0; yyerror("missing '(' or ')' ?"); }
 		| LOG_TOK LPAREN error RPAREN { $$=0; yyerror("bad log"
 									"argument"); }
-		| SETDEBUG LPAREN snumber RPAREN {
-			mk_action2($$, SET_DEBUG_T, NUMBER_ST, 0, (void *)$3, 0 );
-			}
-		| SETDEBUG LPAREN RPAREN {mk_action2( $$, SET_DEBUG_T, 0, 0, 0, 0 ); }
-		| SETDEBUG error { $$=0; yyerror("missing '(' or ')'?"); }
 		| SETFLAG LPAREN NUMBER RPAREN {
 			mk_action2($$, SETFLAG_T, NUMBER_ST, 0, (void *)$3, 0 );
 			}
@@ -2106,21 +2116,6 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 		| ISFLAGSET LPAREN ID RPAREN {mk_action2( $$, ISFLAGSET_T,
 										STR_ST, 0, (void *)$3, 0 ); }
 		| ISFLAGSET error { $$=0; yyerror("missing '(' or ')'?"); }
-		| SETSFLAG LPAREN NUMBER RPAREN {mk_action2( $$, SETSFLAG_T, NUMBER_ST,
-										0, (void *)$3, 0 ); }
-		| SETSFLAG LPAREN ID RPAREN {mk_action2( $$, SETSFLAG_T, STR_ST,
-										0, (void *)$3, 0 ); }
-		| SETSFLAG error { $$=0; yyerror("missing '(' or ')'?"); }
-		| RESETSFLAG LPAREN NUMBER RPAREN {mk_action2( $$, RESETSFLAG_T,
-										NUMBER_ST, 0, (void *)$3, 0 ); }
-		| RESETSFLAG LPAREN ID RPAREN {mk_action2( $$, RESETSFLAG_T,
-										STR_ST, 0, (void *)$3, 0 ); }
-		| RESETSFLAG error { $$=0; yyerror("missing '(' or ')'?"); }
-		| ISSFLAGSET LPAREN NUMBER RPAREN {mk_action2( $$, ISSFLAGSET_T,
-										NUMBER_ST, 0, (void *)$3, 0 ); }
-		| ISSFLAGSET LPAREN ID RPAREN {mk_action2( $$, ISSFLAGSET_T,
-										STR_ST, 0, (void *)$3, 0 ); }
-		| ISSFLAGSET error { $$=0; yyerror("missing '(' or ')'?"); }
 		| SETBFLAG LPAREN NUMBER COMMA NUMBER RPAREN {mk_action2( $$,
 													SETBFLAG_T,
 													NUMBER_ST, NUMBER_ST,
@@ -2233,12 +2228,17 @@ cmd:	 FORWARD LPAREN STRING RPAREN	{ mk_action2( $$, FORWARD_T,
 		| STRIP LPAREN error RPAREN { $$=0; yyerror("bad argument, "
 														"number expected"); }
 		| APPEND_BRANCH LPAREN STRING COMMA STRING RPAREN {
-				{   qvalue_t q;
-				if (str2q(&q, $5, strlen($5)) < 0) {
-					yyerror("bad argument, q value expected");
-				}
+			{
+				qvalue_t q;
+
+				rc = str2q(&q, $5, strlen($5));
+				if (rc < 0)
+					yyerrorf("bad qvalue (%.*s): %s",
+							 strlen($5), $5, qverr2str(rc));
+
 				mk_action2( $$, APPEND_BRANCH_T, STR_ST, NUMBER_ST, $3,
-						(void *)(long)q); }
+						(void *)(long)q);
+			}
 		}
 		| APPEND_BRANCH LPAREN STRING RPAREN { mk_action2( $$, APPEND_BRANCH_T,
 						STR_ST, NUMBER_ST, $3, (void *)Q_UNSPECIFIED) ; }

@@ -369,8 +369,6 @@ static int mod_init(void)
 
 	LM_INFO("initializing module...\n");
 
-	init_db_url( default_dp_db_url , 0 /*can be null*/);
-
 	dpid_column.len     	= strlen(dpid_column.s);
 	pr_column.len       	= strlen(pr_column.s);
 	match_op_column.len 	= strlen(match_op_column.s);
@@ -700,7 +698,7 @@ static int dp_translate_f(struct sip_msg *msg, char *str1, char *str2,
 	/* we are done reading -> unref the data */
 	lock_stop_read( connection->ref_lock );
 
-	if (attr_spec) {
+	if (attr_spec && attrs.s && attrs.len) {
 		pval.flags = PV_VAL_STR;
 		pval.rs = attrs;
 

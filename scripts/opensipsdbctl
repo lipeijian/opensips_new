@@ -13,21 +13,25 @@ PATH=$PATH:/usr/local/sbin/
 TEST="false"
 
 ### include resource files, if any
-if [ -f /etc/opensips/opensipsctlrc ]; then
-	. /etc/opensips/opensipsctlrc
-fi
-if [ -f /usr/local/etc/opensips/opensipsctlrc ]; then
-	. /usr/local/etc/opensips/opensipsctlrc
-fi
-if [ -f ~/.opensipsctlrc ]; then
-	. ~/.opensipsctlrc
-fi
+if [ -n "$osipsctlrc" -a -f "$osipsctlrc" ]; then
+	. "$osipsctlrc"
+else
+	if [ -f /etc/opensips/opensipsctlrc ]; then
+		. /etc/opensips/opensipsctlrc
+	fi
+	if [ -f /usr/local/etc/opensips/opensipsctlrc ]; then
+		. /usr/local/etc/opensips/opensipsctlrc
+	fi
+	if [ -f ~/.opensipsctlrc ]; then
+		. ~/.opensipsctlrc
+	fi
 
-if [ $TEST = "true" ]; then
-	if [ -f ./opensipsctlrc ]; then
-		. ./opensipsctlrc
-	elif [ -f scripts/opensipsctlrc ]; then
-		. scripts/opensipsctlrc
+	if [ $TEST = "true" ]; then
+		if [ -f ./opensipsctlrc ]; then
+			. ./opensipsctlrc
+		elif [ -f scripts/opensipsctlrc ]; then
+			. scripts/opensipsctlrc
+		fi
 	fi
 fi
 
@@ -302,12 +306,12 @@ case $1 in
 			exit 1
 		fi
 
-		minfo	"MySQL DB migration tool for OpenSIPS 1.11.x databases\n\
+		minfo	"MySQL DB migration tool for OpenSIPS 2.2.x databases\n\
 ----------------------------------------------------------------------"
 		mwarn "\
 We recommend using this tool ONLY in order to upgrade an existing\n\
-OpenSIPS 1.11.x MySQL database to 2.1 schema. Behaviour when automatically\n\
-migrating earlier DB versions (1.8, 1.9, 1.10) to 2.1 is undefined"
+OpenSIPS 2.2.x MySQL database to 2.3 schema. Behaviour when automatically\n\
+migrating earlier DB versions (1.8, 1.9, 1.10, 1.11, 2.1) to 2.3 is undefined"
 		read -p"Do you wish to continue? (y/N) " ANS
 
 		[ "$ANS" != "y" -a "$ANS" != "Y" ] && exit 1
@@ -461,7 +465,7 @@ migrating earlier DB versions (1.8, 1.9, 1.10) to 2.1 is undefined"
 		echo  "$0 $VERSION"
 		;;
 	*)
-		merr "$0: Uknown command - \"$1\""
+		merr "$0: Unknown command - \"$1\""
 		usage
 		exit 1;
 		;;

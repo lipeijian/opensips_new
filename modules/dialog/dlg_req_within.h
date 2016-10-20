@@ -44,6 +44,10 @@
 #define MI_DLG_OPERATION_ERR		"Operation failed"
 #define MI_DLG_OPERATION_ERR_LEN	(sizeof(MI_DLG_OPERATION_ERR)-1)
 
+#define DLG_PING_PENDING	(1<<0)
+#define DLG_PING_SUCCESS	(1<<1)
+#define DLG_PING_FAIL		(1<<2)
+
 extern struct tm_binds d_tmb;
 extern int dlg_enable_stats;
 extern stat_var * active_dlgs;
@@ -88,6 +92,8 @@ static inline int push_new_processing_context( struct dlg_cell *dlg,
 		my_msg->first_line.u.request.method.len= 5;
 		my_msg->first_line.u.request.uri.s= "sip:user@domain.com";
 		my_msg->first_line.u.request.uri.len= 19;
+		my_msg->rcv.src_ip.af = AF_INET;
+		my_msg->rcv.dst_ip.af = AF_INET;
 		*fake_msg = my_msg;
 	}
 

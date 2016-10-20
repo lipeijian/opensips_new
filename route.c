@@ -227,7 +227,7 @@ static int fix_expr(struct expr* exp)
 			if (exp->right.type==EXPR_ST){
 				ret=fix_expr(exp->right.v.expr);
 				if (ret!=0){
-					LM_CRIT("fix rigth exp error\n");
+					LM_CRIT("fix right exp error\n");
 					return ret;
 				}
 			}
@@ -280,7 +280,8 @@ static int fix_actions(struct action* a)
 					goto error;
 				}
 				if ( rlist[t->elem[0].u.number].a==NULL ) {
-					LM_ERR("called route %d is not defined\n",
+					LM_ERR("called route [%s] (id=%d) is not defined\n",
+						rlist[t->elem[0].u.number].name,
 						(int)t->elem[0].u.number);
 					ret = E_CFG;
 					goto error;
@@ -518,41 +519,15 @@ static int fix_actions(struct action* a)
 				t->elem[0].u.data=si;
 				t->elem[0].type=SOCKETINFO_ST;
 				break;
-			case SET_DEBUG_T:
-				if (t->elem[0].type==NOSUBTYPE)
-					break;
-				if (t->elem[0].type!=NUMBER_ST) {
-					LM_CRIT("BUG in setdebug() type %d\n",
-						t->elem[0].type );
-					ret=E_BUG;
-					goto error;
-				}
-				/* normalize the value */
-				if (t->elem[0].u.number>L_DBG)
-					t->elem[0].u.number = L_DBG;
-				else if (t->elem[0].u.number<L_ALERT)
-					t->elem[0].u.number = L_ALERT;
-				break;
 			case SETFLAG_T:
 			case RESETFLAG_T:
 			case ISFLAGSET_T:
-				i = FLAG_TYPE_MSG;
-			case SETSFLAG_T:
-			case RESETSFLAG_T:
-			case ISSFLAGSET_T:
-
-				if (t->type == SETSFLAG_T || t->type == RESETSFLAG_T ||
-				    t->type == ISSFLAGSET_T) {
-
-					i = FLAG_TYPE_SCRIPT;
-				}
-
 				if (t->elem[0].type == NUMBER_ST) {
 					s.s = int2str((unsigned long)t->elem[0].u.number, &s.len);
-				    t->elem[0].u.number = fixup_flag(i, &s);
+				    t->elem[0].u.number = fixup_flag(FLAG_TYPE_MSG, &s);
 
 				} else if (t->elem[0].type == STR_ST) {
-					t->elem[0].u.number = fixup_flag(i, &t->elem[0].u.s);
+					t->elem[0].u.number = fixup_flag(FLAG_TYPE_MSG, &t->elem[0].u.s);
 
 				} else {
 					LM_CRIT("bad xxxflag() type %d\n", t->elem[0].type);
@@ -625,11 +600,11 @@ static int fix_actions(struct action* a)
 				}
 				host.s = t->elem[0].u.string;
 				host.len = strlen(host.s);
-				if ( strcasecmp(host.s,"all")==0 ) {
+				if (!strcasecmp(host.s, "all")) {
 					blh = NULL;
 				} else {
 					blh = get_bl_head_by_name(&host);
-					if (blh==NULL) {
+					if (!blh) {
 						LM_ERR("[UN]USE_BLACKLIST - list "
 							"%s not configured\n", t->elem[0].u.string);
 						ret=E_CFG;
@@ -1758,13 +1733,18 @@ static int eval_elem(struct expr* e, struct sip_msg* msg, pv_value_t *val)
 					if(val!=NULL) val->ri = ival;
 					return (ival)?1:0;
 				} else if (e->op == PLUS_OP) {
-					if( (rval.flags&PV_VAL_NULL) || (val==NULL)) {
-						if (val) val->flags|=PV_VAL_STR;
+					if (!val) {
 						ret = (lval.rs.len>0 || rval.rs.len>0);
 						pv_value_destroy(&lval);
 						pv_value_destroy(&rval);
 						return ret;
 					}
+
+					if (rval.flags & PV_VAL_NULL) {
+						pv_value_destroy(&rval);
+						rval.flags = PV_VAL_STR;
+					}
+
 					if(!(rval.flags&PV_VAL_STR))
 					{
 						LM_ERR("invalid string operands\n");
@@ -2422,8 +2402,10 @@ int run_startup_route(void)
 
 	req.first_line.u.request.method.s= "DUMMY";
 	req.first_line.u.request.method.len= 5;
-	req.first_line.u.request.uri.s= "user";
-	req.first_line.u.request.uri.len= 4;
+	req.first_line.u.request.uri.s= "sip:user@domain.com";
+	req.first_line.u.request.uri.len= 19;
+	req.rcv.src_ip.af = AF_INET;
+	req.rcv.dst_ip.af = AF_INET;
 
 	/* run the route */
 	return run_top_route( startup_rlist.a, &req);

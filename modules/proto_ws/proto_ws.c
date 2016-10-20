@@ -122,6 +122,8 @@ struct module_exports exports = {
 
 static int proto_ws_init(struct proto_info *pi)
 {
+	pi->id					= PROTO_WS;
+	pi->name				= "ws";
 	pi->default_port		= ws_port;
 
 	pi->tran.init_listener	= proto_ws_init_listener;
@@ -296,9 +298,9 @@ static int proto_ws_send(struct socket_info* send_sock,
 	if (to){
 		su2ip_addr(&ip, to);
 		port=su_getport(to);
-		n = tcp_conn_get(id, &ip, port, &c, &fd);
+		n = tcp_conn_get(id, &ip, port, PROTO_WS, &c, &fd);
 	}else if (id){
-		n = tcp_conn_get(id, 0, 0, &c, &fd);
+		n = tcp_conn_get(id, 0, 0, PROTO_NONE, &c, &fd);
 	}else{
 		LM_CRIT("prot_tls_send called with null id & to\n");
 		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
@@ -307,7 +309,7 @@ static int proto_ws_send(struct socket_info* send_sock,
 
 	if (n<0) {
 		/* error during conn get, return with error too */
-		LM_ERR("failed to aquire connection\n");
+		LM_ERR("failed to acquire connection\n");
 		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
 		return -1;
 	}

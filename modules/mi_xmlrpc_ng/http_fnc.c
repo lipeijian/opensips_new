@@ -243,8 +243,6 @@ static int mi_xmlrpc_http_write_node_old(char** pointer, char* buf, int max_page
 					struct mi_node *node, int level);
 
 static const str MI_XMLRPC_HTTP_CR = str_init("\n");
-static const str MI_XMLRPC_HTTP_SLASH = str_init("/");
-static const str MI_XMLRPC_HTTP_SEMICOLON = str_init(" : ");
 
 static const str MI_XMLRPC_HTTP_NODE_INDENT = str_init("   ");
 static const str MI_XMLRPC_HTTP_NODE_SEPARATOR = str_init(":: ");
@@ -461,6 +459,7 @@ static inline struct mi_handler* mi_xmlrpc_http_build_async_handler(void)
 struct mi_root* mi_xmlrpc_http_run_mi_cmd(const str* arg,
 		str *page, str *buffer, struct mi_handler **async_hdl)
 {
+	static str esc_buf = {NULL, 0};
 	struct mi_cmd *f;
 	struct mi_node *node;
 	struct mi_root *mi_cmd = NULL;
@@ -474,8 +473,7 @@ struct mi_root* mi_xmlrpc_http_run_mi_cmd(const str* arg,
 	xmlNodePtr param_node;
 	xmlNodePtr value_node;
 	xmlNodePtr string_node;
-	str val;
-	str esc_val = {NULL, 0};
+	str val, esc_val = {NULL, 0};
 
 	//LM_DBG("arg [%p]->[%.*s]\n", arg->s, arg->len, arg->s);
 	doc = xmlParseMemory(arg->s, arg->len);
@@ -532,55 +530,59 @@ struct mi_root* mi_xmlrpc_http_run_mi_cmd(const str* arg,
 			}
 			params_node = mi_xmlNodeGetNodeByName(methodCall_node->children,
 									MI_XMLRPC_HTTP_XML_PARAMS_NODE);
-			if (params_node==NULL) {
-				LM_ERR("missing node %s\n", MI_XMLRPC_HTTP_XML_PARAMS_NODE);
-				goto xml_error;
-			}
-			for(param_node=params_node->children;
+			if (params_node!=NULL) {
+				for(param_node=params_node->children;
 						param_node;param_node=param_node->next){
-				if (xmlStrcasecmp(param_node->name,
-					(const xmlChar*)MI_XMLRPC_HTTP_XML_PARAM_NODE) == 0) {
-					value_node = mi_xmlNodeGetNodeByName(param_node->children,
+					if (xmlStrcasecmp(param_node->name,
+						(const xmlChar*)MI_XMLRPC_HTTP_XML_PARAM_NODE) == 0) {
+						value_node = mi_xmlNodeGetNodeByName(param_node->children,
 								MI_XMLRPC_HTTP_XML_VALUE_NODE);
-					if (value_node==NULL) {
-						LM_ERR("missing node %s\n",
-								MI_XMLRPC_HTTP_XML_VALUE_NODE);
-						goto xml_error;
-					}
-					string_node = mi_xmlNodeGetNodeByName(value_node->children,
+						if (value_node==NULL) {
+							LM_ERR("missing node %s\n",
+									MI_XMLRPC_HTTP_XML_VALUE_NODE);
+							goto xml_error;
+						}
+						string_node = mi_xmlNodeGetNodeByName(value_node->children,
 								MI_XMLRPC_HTTP_XML_STRING_NODE);
-					if (string_node==NULL) {
-						LM_ERR("missing node %s\n",
+						if (string_node==NULL) {
+							LM_ERR("missing node %s\n",
 								MI_XMLRPC_HTTP_XML_STRING_NODE);
-						goto xml_error;
-					}
-					val.s = (char*)xmlNodeGetContent(string_node);
-					if(val.s==NULL){
-						LM_ERR("No content for node [%s]\n",
+							goto xml_error;
+						}
+						val.s = (char*)xmlNodeGetContent(string_node);
+						if(val.s==NULL){
+							LM_ERR("No content for node [%s]\n",
 								string_node->name);
-						goto xml_error;
-					}
-					val.len = strlen(val.s);
-					if(val.len==0){
-						LM_ERR("Empty content for node [%s]\n",
+							goto xml_error;
+						}
+						val.len = strlen(val.s);
+						if(val.len==0){
+							LM_ERR("Empty content for node [%s]\n",
 								string_node->name);
-						goto xml_error;
-					}
-					LM_DBG("got string param [%.*s]\n", val.len, val.s);
+							goto xml_error;
+						}
+						LM_DBG("got string param [%.*s]\n", val.len, val.s);
 
-					esc_val.s = shm_malloc(val.len);
-					if (esc_val.s == NULL) {
-						free_mi_tree(mi_cmd);
-						goto xml_error;
-					}
-					esc_val.len = unescape_xml(esc_val.s, val.s, val.len);
-					LM_DBG("got escaped string param [%.*s]\n", esc_val.len, esc_val.s);
+						if (val.len > esc_buf.len) {
+							esc_buf.s = shm_realloc(esc_buf.s, val.len);
+							if (!esc_buf.s) {
+								esc_buf.len = 0;
+								free_mi_tree(mi_cmd);
+								goto xml_error;
+							}
+							esc_buf.len = val.len;
+						}
 
-					node = &mi_cmd->node;
-					if(!add_mi_node_child(node,0,NULL,0,esc_val.s,esc_val.len)){
-						LM_ERR("cannot add the child node to the tree\n");
-						free_mi_tree(mi_cmd);
-						goto xml_error;
+						esc_val.s = esc_buf.s;
+						esc_val.len = unescape_xml(esc_val.s, val.s, val.len);
+						LM_DBG("got escaped string param [%.*s]\n", esc_val.len, esc_val.s);
+
+						node = &mi_cmd->node;
+						if(!add_mi_node_child(node,MI_DUP_VALUE,NULL,0,esc_val.s,esc_val.len)){
+							LM_ERR("cannot add the child node to the tree\n");
+							free_mi_tree(mi_cmd);
+							goto xml_error;
+						}
 					}
 				}
 			}
@@ -599,7 +601,6 @@ struct mi_root* mi_xmlrpc_http_run_mi_cmd(const str* arg,
 				(mi_flush_f *)mi_xmlrpc_http_flush_tree, &html_page_data);
 	if (mi_rpl == NULL) {
 		LM_ERR("failed to process the command\n");
-		if (mi_cmd) free_mi_tree(mi_cmd);
 		goto xml_error;
 	} else {
 		*page = html_page_data.page;
@@ -609,16 +610,16 @@ struct mi_root* mi_xmlrpc_http_run_mi_cmd(const str* arg,
 	*async_hdl = hdl;
 
 	if (mi_cmd) free_mi_tree(mi_cmd);
-	if(doc)xmlFree(doc);doc=NULL;
-	if(esc_val.s) shm_free(esc_val.s);
+	if(doc) xmlFree(doc);
+	doc=NULL;
 	return mi_rpl;
 
 xml_error:
 	if (mi_cmd) free_mi_tree(mi_cmd);
 	if (hdl) shm_free(hdl);
 	*async_hdl = NULL;
-	if(doc)xmlFree(doc);doc=NULL;
-	if(esc_val.s) shm_free(esc_val.s);
+	if(doc) xmlFree(doc);
+	doc=NULL;
 	return NULL;
 }
 
@@ -747,7 +748,7 @@ static int mi_xmlrpc_http_recur_write_tree(char** pointer, char *buf, int max_pa
 			MI_XMLRPC_HTTP_COPY(*pointer, MI_XMLRPC_HTTP_MEMBER_START);
 			MI_XMLRPC_HTTP_COPY(*pointer, MI_XMLRPC_HTTP_NAME_START);
 
-			if (tree->name.s!=NULL) 
+			if (tree && tree->name.s)
 				MI_XMLRPC_HTTP_ESC_COPY(*pointer, tree->name, temp_holder, temp_counter);
 			else
 				MI_XMLRPC_HTTP_COPY(*pointer, MI_XMLRPC_HTTP_NAME_DEFAULT);
@@ -900,7 +901,7 @@ error:
 }
 
 
-/* old implementations for less formated ouput */
+/* old implementations for less formatted ouput */
 
 int mi_xmlrpc_http_build_header(str *page, int max_page_len,
 				struct mi_root *tree, int flush)

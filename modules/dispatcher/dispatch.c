@@ -67,6 +67,7 @@
 #include "../../rw_locking.h"
 
 #include "dispatch.h"
+#include "ds_fixups.h"
 #include "ds_bl.h"
 
 #define DS_TABLE_VERSION	7
@@ -280,6 +281,7 @@ int add_dest2list(int id, str uri, struct socket_info *sock, int state,
 	}
 	hostent2ip_addr( &dp->ips[0], &proxy->host, proxy->addr_idx);
 	dp->ports[0] = proxy->port;
+	dp->protos[0] = proxy->proto;
 	dp->ips_cnt = 1;
 	dp->priority = prio;
 	LM_DBG("first gw ip addr [%s]:%d\n",
@@ -288,8 +290,10 @@ int add_dest2list(int id, str uri, struct socket_info *sock, int state,
 	while (dp->ips_cnt<DS_MAX_IPS && (get_next_su( proxy, &sau, 0)==0) ) {
 		su2ip_addr( &dp->ips[dp->ips_cnt], &sau);
 		dp->ports[dp->ips_cnt] = proxy->port;
-		LM_DBG("additional gw ip addr [%s]:%d\n",
-			ip_addr2a(&dp->ips[dp->ips_cnt]), dp->ports[dp->ips_cnt]);
+		dp->protos[dp->ips_cnt] = proxy->proto;
+		LM_DBG("additional gw ip addr [%s]:%d, proto %d\n",
+			ip_addr2a(&dp->ips[dp->ips_cnt]),
+			dp->ports[dp->ips_cnt], dp->protos[dp->ips_cnt]);
 		/* one more IP found */
 		dp->ips_cnt++;
 	}
@@ -997,6 +1001,7 @@ static inline int get_uri_hash_keys(str* key1, str* key2,
 							str* uri, struct sip_uri* parsed_uri, int flags)
 {
 	struct sip_uri tmp_p_uri; /* used only if parsed_uri==0 */
+	unsigned short proto;
 
 	if (parsed_uri==0)
 	{
@@ -1015,8 +1020,8 @@ static inline int get_uri_hash_keys(str* key1, str* key2,
 			goto error;
 	}
 
-	/* we want: user@host:port if port !=5060
-	 *          user@host if port==5060
+	/* we want: user@host:port if port is not the defaut one
+	 *          user@host if port is the default one
 	 *          user if the user flag is set*/
 	*key1=parsed_uri->user;
 	key2->s=0;
@@ -1027,9 +1032,9 @@ static inline int get_uri_hash_keys(str* key1, str* key2,
 		/* add port if needed */
 		if (parsed_uri->port.s!=0)
 		{ /* uri has a port */
-			/* skip port if == 5060 or sips and == 5061 */
-			if (parsed_uri->port_no !=
-					((parsed_uri->type==SIPS_URI_T)?SIPS_PORT:SIP_PORT))
+			/* skip port if the default one ( first extract proto from URI) */
+			if ( get_uri_port(parsed_uri, &proto) &&
+			parsed_uri->port_no != protos[proto].default_port )
 				key2->len+=parsed_uri->port.len+1 /* ':' */;
 		}
 	}
@@ -1303,7 +1308,7 @@ int ds_update_dst(struct sip_msg *msg, str *uri, struct socket_info *sock,
 
 			utype = str2uri_type(uri->s);
 			if (utype == ERROR_URI_T) {
-				LM_ERR("Uknown uri type\n");
+				LM_ERR("Unknown uri type\n");
 				return -1;
 			}
 			typelen = uri_typestrlen(utype);
@@ -1484,8 +1489,17 @@ int ds_select_dst(struct sip_msg *msg, ds_select_ctl_p ds_select_ctl,
 			}
 		break;
 		case 4:
-			/* round robin */
-			ds_id = (idx->last+1) % set_size;
+			/* round robin
+			   Each destination is selected a number of times equal to its weight before moving
+			   to the next destination
+			   the count is incremented after we verify that the destination is active
+			*/
+			if( idx->dlist[idx->last].rr_count < idx->dlist[idx->last].weight)
+				ds_id = idx->last;
+			else {
+				idx->dlist[idx->last].rr_count = 0;
+				ds_id = (idx->last+1) % set_size;
+			}
 		break;
 		case 5:
 			i = ds_hash_authusername(msg, &ds_hash);
@@ -1615,6 +1629,10 @@ int ds_select_dst(struct sip_msg *msg, ds_select_ctl_p ds_select_ctl,
 
 	/* remember the last used destination */
 	idx->last = ds_id;
+
+	/* increase  chosen count in round-robin algritm, now that we know the candidate is active*/
+	if(ds_select_ctl->alg == 4)
+		idx->dlist[ds_id].rr_count++;
 
 	/* start pushing the destinations to SIP level */
 	cnt = 0;
@@ -2250,8 +2268,11 @@ void ds_check_timer(unsigned int ticks, void* param)
 		{
 			for(j=0; j<list->nr; j++)
 			{
-				/* If the Flag of the entry has "Probing set, send a probe:	*/
-				if ( ((list->dlist[j].flags&DS_INACTIVE_DST)==0) &&
+				/* If list is probed by this proxy and the Flag of
+                                 * the entry has "Probing" set, send a probe:
+                                 */
+				if ( (!ds_probing_list || in_int_list(ds_probing_list, list->id)==0) &&
+                                ((list->dlist[j].flags&DS_INACTIVE_DST)==0) &&
 				(ds_probing_mode==1 || (list->dlist[j].flags&DS_PROBING_DST)!=0
 				))
 				{

@@ -133,6 +133,10 @@ after_strcseq:
 	td->state= DLG_CONFIRMED;
 	td->send_sock = cell->legs[dst_leg].bind_addr;
 
+	/* link the dialog cell here - it will eventually be linked
+	 * within the upcoming created transaction */
+	td->dialog_ctx = cell;
+
 	return td;
 
 error:
@@ -167,7 +171,7 @@ dlg_t * build_dialog_info(struct dlg_cell * cell, int dst_leg, int src_leg,char 
 	else
 		cell->legs[dst_leg].last_gen_cseq++;
 
-	*reply_marker = 0;
+	*reply_marker = DLG_PING_PENDING;
 
 	td->loc_seq.value = cell->legs[dst_leg].last_gen_cseq -1;
 
@@ -199,6 +203,10 @@ dlg_t * build_dialog_info(struct dlg_cell * cell, int dst_leg, int src_leg,char 
 
 	td->state= DLG_CONFIRMED;
 	td->send_sock = cell->legs[dst_leg].bind_addr;
+
+	/* link the dialog cell here - it will eventually be linked
+	 * within the upcoming created transaction */
+	td->dialog_ctx = cell;
 
 	return td;
 
@@ -256,7 +264,8 @@ static void dual_bye_event(struct dlg_cell* dlg, struct sip_msg *req, int extra_
 			/* set new msg & processing context */
 			if (push_new_processing_context( dlg, &old_ctx, &new_ctx, &fake_msg)==0) {
 				/* dialog terminated (BYE) */
-				run_dlg_callbacks( DLGCB_TERMINATED, dlg, fake_msg, DLG_DIR_NONE, 0);
+				run_dlg_callbacks( DLGCB_TERMINATED, dlg, fake_msg,
+					DLG_DIR_NONE, NULL, 0);
 				/* reset the processing context */
 				if (current_processing_ctx == NULL)
 					*new_ctx = NULL;
@@ -267,7 +276,8 @@ static void dual_bye_event(struct dlg_cell* dlg, struct sip_msg *req, int extra_
 		} else {
 			/* we should have the msg and context from upper levels */
 			/* dialog terminated (BYE) */
-			run_dlg_callbacks( DLGCB_TERMINATED, dlg, req, DLG_DIR_NONE, 0);
+			run_dlg_callbacks( DLGCB_TERMINATED, dlg, req,
+				DLG_DIR_NONE, NULL, 0);
 		}
 
 		LM_DBG("first final reply\n");
@@ -459,15 +469,18 @@ int dlg_end_dlg(struct dlg_cell *dlg, str *extra_hdrs)
 	return res;
 }
 
-/*parameters from MI: h_entry, h_id of the requested dialog*/
+/*parameters from MI: dialog ID of the requested dialog*/
 struct mi_root * mi_terminate_dlg(struct mi_root *cmd_tree, void *param ){
 
 	struct mi_node* node;
 	unsigned int h_entry, h_id;
+	unsigned long long d_id;
 	struct dlg_cell * dlg = NULL;
 	str *mi_extra_hdrs = NULL;
 	int status, msg_len;
 	char *msg;
+	char *end;
+	char bkp;
 
 
 	if( d_table ==NULL)
@@ -476,23 +489,33 @@ struct mi_root * mi_terminate_dlg(struct mi_root *cmd_tree, void *param ){
 	node = cmd_tree->node.kids;
 	h_entry = h_id = 0;
 
-	if (node==NULL || node->next==NULL)
+	if (node==NULL)
 		return init_mi_tree( 400, MI_MISSING_PARM_S, MI_MISSING_PARM_LEN);
 
-	if (!node->value.s|| !node->value.len|| strno2int(&node->value,&h_entry)<0)
+	/* parse first param as long long (dialog_id ) */
+	if ( node->value.s==NULL || node->value.len==0 )
 		goto error;
+	/* make value null terminated (in an ugly way) */
+	bkp = node->value.s[node->value.len];
+	node->value.s[node->value.len] = 0;
+	/* conver to long long */
+	d_id = strtoll( node->value.s, &end, 10);
+	node->value.s[node->value.len] = bkp;
+	if (end-node->value.s!=node->value.len)
+		goto error; /* not a number*/
 
-	node = node->next;
-	if ( !node->value.s || !node->value.len || strno2int(&node->value,&h_id)<0)
-		goto error;
-
+	/* second param (optional) is the extra hdrs */
 	if (node->next) {
 		node = node->next;
 		if (node->value.len && node->value.s)
 			mi_extra_hdrs = &node->value;
 	}
 
-	LM_DBG("h_entry %u h_id %u\n", h_entry, h_id);
+	h_entry = (unsigned int)(d_id>>(8*sizeof(int)));
+	h_id = (unsigned int)(d_id &
+		(((unsigned long long)1<<(8*sizeof(int)))-1) );
+
+	LM_DBG("ID: %llu (h_entry %u h_id %u)\n", d_id, h_entry, h_id);
 
 	dlg = lookup_dlg(h_entry, h_id);
 

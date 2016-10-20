@@ -137,8 +137,6 @@ static int fixup_stat(void** param, int param_no)
 	struct stat_param *sp;
 	pv_elem_t *format;
 	str s;
-	long n;
-	int err;
 
 	s.s = (char*)*param;
 	s.len = strlen(s.s);
@@ -183,36 +181,28 @@ static int fixup_stat(void** param, int param_no)
 		*param=(void*)sp;
 		return 0;
 	} else if (param_no==2) {
-		/* update value - integer */
-		if (s.s[0]=='-' || s.s[0]=='+') {
-			n = str2s( s.s+1, s.len-1, &err);
-			if (s.s[0]=='-')
-				n = -n;
-		} else {
-			n = str2s( s.s, s.len, &err);
-		}
-		if (err==0){
-			if (n==0) {
-				LM_ERR("update with 0 has no sense\n");
-				return E_CFG;
-			}
-			pkg_free(*param);
-			*param=(void*)n;
-			return 0;
-		}else{
-			LM_ERR("bad update number <%s>\n",(char*)(*param));
-			return E_CFG;
-		}
+		/* update value - integer or variable */
+		return fixup_igp(param);
 	}
 	return 0;
 }
 
 
-static int w_update_stat(struct sip_msg *msg, char *stat_p, char *n)
+static int w_update_stat(struct sip_msg *msg, char *stat_p, char *val)
 {
 	struct stat_param *sp = (struct stat_param *)stat_p;
 	pv_value_t pv_val;
 	stat_var *stat;
+	int n;
+
+	/* evaluate the value first */
+	if (fixup_get_ivalue( msg, (gparam_p)val, &n)<0) {
+		LM_ERR("failed to extran a numerical value\n");
+		return -1;
+	}
+	/* update with 0 value makes no sense */
+	if (n==0)
+		return 1;
 
 	if (sp->type==STAT_PARAM_TYPE_STAT) {
 		/* we have the statistic */
@@ -324,6 +314,7 @@ int pv_parse_name(pv_spec_p sp, str *in)
 	if(in==NULL || in->s==NULL || sp==NULL)
 		return -1;
 
+	LM_DBG("name %p with name <%.*s>\n", &sp->pvp.pvn, in->len, in->s);
 	if (pv_parse_format( in, &format)!=0) {
 		LM_ERR("failed to parse statistic name format <%.*s> \n",
 			in->len,in->s);
@@ -344,10 +335,13 @@ int pv_parse_name(pv_spec_p sp, str *in)
 				LM_ERR("failed to clone name of statistic \n");
 				return -1;
 			}
+			LM_DBG("name %p, name cloned (in=%p, out=%p)\n",
+				&sp->pvp.pvn, in->s, sp->pvp.pvn.u.isname.name.s.s);
 		} else {
 			/* link the stat pointer directly as dynamic name */
 			sp->pvp.pvn.type = PV_NAME_PVAR;
 			sp->pvp.pvn.u.dname = (void*)stat;
+			LM_DBG("name %p, stat found\n", &sp->pvp.pvn);
 		}
 
 	} else {
@@ -356,6 +350,7 @@ int pv_parse_name(pv_spec_p sp, str *in)
 			sp->pvp.pvn.u.isname.type = 0; /* not string */
 			sp->pvp.pvn.u.isname.name.s.s = (char*)(void*)format;
 			sp->pvp.pvn.u.isname.name.s.len = 0;
+			LM_DBG("name %p, stat name is FMT\n", &sp->pvp.pvn);
 
 	}
 
@@ -370,6 +365,7 @@ static inline int get_stat_name(struct sip_msg* msg, pv_name_t *name,
 
 	/* is the statistic found ? */
 	if (name->type==PV_NAME_INTSTR) {
+		LM_DBG("stat with name %p still not found\n", name);
 		/* not yet :( */
 		/* do we have at least the name ?? */
 		if (name->u.isname.type==0) {
@@ -385,6 +381,8 @@ static inline int get_stat_name(struct sip_msg* msg, pv_name_t *name,
 		}
 		/* lookup for the statistic */
 		*stat = get_stat( &pv_val.rs );
+		LM_DBG("stat name %p (%.*s) after lookup is %p\n",
+			name, pv_val.rs.len, pv_val.rs.s, *stat);
 		if (*stat==NULL) {
 			if (!create)
 				return 0;
@@ -397,9 +395,15 @@ static inline int get_stat_name(struct sip_msg* msg, pv_name_t *name,
 				return -1;
 			}
 		}
-		/* if name is static string, better link the stat directly and discard name */
+		/* if name is static string, better link the stat directly
+		 * and discard name */
 		if (name->u.isname.type==AVP_NAME_STR) {
-			shm_free(name->u.isname.name.s.s);
+			LM_DBG("name %p freeing %p\n",name,name->u.isname.name.s.s);
+			/* it is totally unsafe to free this shm block here, as it is
+			 * referred by the spec from all the processess. Even if we create
+			 * here a small leak (one time only), we do not have a better fix
+			 * until a final review of the specs in pkg and shm mem - bogdan */
+			//shm_free(name->u.isname.name.s.s);
 			name->u.isname.name.s.s = NULL;
 			name->u.isname.name.s.len = 0;
 			name->type = PV_NAME_PVAR;
@@ -408,6 +412,7 @@ static inline int get_stat_name(struct sip_msg* msg, pv_name_t *name,
 	} else {
 		/* stat already found ! */
 		*stat = (stat_var*)name->u.dname;
+		LM_DBG("stat name %p is founded\n",name);
 	}
 
 	return 0;

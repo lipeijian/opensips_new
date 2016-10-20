@@ -32,7 +32,9 @@
 #include <assert.h>
 #include <unistd.h>
 
+
 #include "../../evi/evi.h"
+#include "../../map.h"
 
 #include "dr_load.h"
 #include "prefix_tree.h"
@@ -119,6 +121,12 @@ static str carrier_id_avp_spec = {NULL, 0};
 /* internal AVP used to store CARRIER ATTRs */
 static str carrier_attrs_avp_spec = str_init("$avp(___dr_cr_att__)");
 
+/* AVP used to store PARTITION ID when using wildcard operator instead of
+ * partition name */
+static str partition_pvar = {NULL, 0};
+pv_spec_t partition_spec;
+
+
 
 /*
  * global pointers for faster parameter passing between functions
@@ -184,7 +192,7 @@ typedef struct dr_partition {
 		gparam_p part_name;
 	} v;
 
-	enum dr_partition_type { DR_PTR_PART, DR_GPARAM_PART, DR_NO_PART } type;
+	enum dr_partition_type { DR_PTR_PART, DR_GPARAM_PART, DR_WILDCARD_PART, DR_NO_PART } type;
 } dr_partition_t;
 
 typedef struct dr_part_group {
@@ -399,6 +407,7 @@ static param_export_t params[] = {
 	{"probing_reply_codes",STR_PARAM, &dr_probe_replies.s     },
 	{"persistent_state", INT_PARAM, &dr_persistent_state      },
 	{"no_concurrent_reload",INT_PARAM, &no_concurrent_reload  },
+	{"partition_id_pvar", STR_PARAM, &partition_pvar.s},
 	{0, 0, 0}
 };
 
@@ -584,7 +593,7 @@ static int dr_disable_w_part(struct sip_msg *req, struct head_db *current_partit
 		return -1;
 	}
 
-	gw = get_gw_by_id( (*current_partition->rdata)->pgw_l, &id_val.s );
+	gw = get_gw_by_id( (*current_partition->rdata)->pgw_tree, &id_val.s );
 	if (gw!=NULL && (gw->flags&DR_DST_STAT_DSBL_FLAG)==0) {
 		LM_INFO(" partition : %.*s\n", current_partition->partition.len,
 				current_partition->partition.s);
@@ -624,7 +633,7 @@ static void dr_probing_callback( struct cell *t, int type,
 
 	_id = ((param_prob_callback_t*)*ps->param)->_id;
 
-	gw = get_gw_by_internal_id( (*(current_partition->rdata))->pgw_l, _id);
+	gw = get_gw_by_internal_id( (*(current_partition->rdata))->pgw_tree, _id);
 	if (gw==NULL)
 		goto end;
 
@@ -666,6 +675,9 @@ static void dr_prob_handler(unsigned int ticks, void* param)
 	dlg_t *dlg;
 	str uri;
 
+	void** dest;
+	map_iterator_t map_it;
+
 	struct head_db *it = head_db_start;
 	while( it!=NULL ) {
 		if (it->rdata==NULL || *(it->rdata)==NULL)
@@ -674,7 +686,15 @@ static void dr_prob_handler(unsigned int ticks, void* param)
 		lock_start_read( it->ref_lock );
 
 		/* go through all destinations */
-		for( dst = (*(it->rdata))->pgw_l ; dst ; dst=dst->next ) {
+		for (map_first( (*(it->rdata))->pgw_tree, &map_it);
+				iterator_is_valid(&map_it); iterator_next(&map_it)) {
+
+			dest = iterator_val(&map_it);
+			if (dest==NULL)
+				break;
+
+			dst = (pgw_t*)*dest;
+
 			/* dst requires probing ? */
 			if ( dst->flags&DR_DST_STAT_NOEN_FLAG
 					|| !( (dst->flags&DR_DST_PING_PERM_FLAG)  ||  /*permanent probing*/
@@ -730,6 +750,9 @@ static void dr_state_flusher(struct head_db* hd)
 	db_key_t key_set;
 	db_val_t val_set;
 
+	void** dest;
+	map_iterator_t it;
+
 	if(!hd) {
 		LM_ERR(" Bug - no head supplied to dr_state_flusher\n");
 	}
@@ -753,7 +776,15 @@ static void dr_state_flusher(struct head_db* hd)
 	key_set = &state_drd_col;
 
 	/* iterate the gateways */
-	for( gw=(*hd->rdata)->pgw_l ; gw ; gw=gw->next ) {
+	for (map_first((*hd->rdata)->pgw_tree , &it);
+			iterator_is_valid(&it); iterator_next(&it)) {
+
+		dest = iterator_val(&it);
+		if (dest==NULL)
+			break;
+
+		gw = (pgw_t*)*dest;
+
 		if ( (gw->flags & DR_DST_STAT_DIRT_FLAG)==0 )
 			/* nothing to do for this gateway */
 			continue;
@@ -783,7 +814,15 @@ static void dr_state_flusher(struct head_db* hd)
 	key_set = &state_drc_col;
 
 	/* iterate the carriers */
-	for( cr=(*hd->rdata)->carriers ; cr ; cr=cr->next ) {
+	for (map_first( (*hd->rdata)->carriers_tree, &it);
+			iterator_is_valid(&it); iterator_next(&it)) {
+
+		dest = iterator_val(&it);
+		if (dest==NULL)
+			break;
+
+		cr = (pcr_t*)*dest;
+
 		if ( (cr->flags & DR_CR_FLAG_DIRTY)==0 )
 			/* nothing to do for this carrier */
 			continue;
@@ -836,6 +875,9 @@ static inline int dr_reload_data_head( struct head_db *hd )
 	pcr_t *cr, *old_cr;
 	time_t rawtime;
 
+	void **dest;
+	map_iterator_t it;
+
 	if (no_concurrent_reload) {
 		lock_get( hd->ref_lock->lock );
 		if (hd->ongoing_reload) {
@@ -868,16 +910,31 @@ static inline int dr_reload_data_head( struct head_db *hd )
 	if (old_data) {
 		/* copy the state of gw/cr from old data */
 		/* interate new gws and search them into old data */
-		for( gw=new_data->pgw_l ; gw ; gw=gw->next ) {
-			old_gw = get_gw_by_id( old_data->pgw_l, &gw->id);
+		for (map_first(new_data->pgw_tree, &it);
+				iterator_is_valid(&it); iterator_next(&it)) {
+			dest = iterator_val(&it);
+			if(dest==NULL)
+				break;
+
+			gw=(pgw_t *)*dest;
+
+			old_gw = get_gw_by_id( old_data->pgw_tree, &gw->id);
 			if (old_gw) {
 				gw->flags &= ~DR_DST_STAT_MASK;
 				gw->flags |= old_gw->flags&DR_DST_STAT_MASK;
 			}
 		}
 		/* interate new crs and search them into old data */
-		for( cr=new_data->carriers ; cr ; cr=cr->next ) {
-			old_cr = get_carrier_by_id( old_data->carriers, &cr->id);
+		for (map_first(new_data->carriers_tree, &it);
+				iterator_is_valid(&it); iterator_next(&it)) {
+			dest = iterator_val(&it);
+			if(dest==NULL)
+				break;
+
+			cr=(pcr_t *)*dest;
+
+
+			old_cr = get_carrier_by_id( old_data->carriers_tree, &cr->id);
 			if (old_cr) {
 				cr->flags &= ~DR_CR_FLAG_IS_OFF;
 				cr->flags |= old_cr->flags&DR_CR_FLAG_IS_OFF;
@@ -889,7 +946,7 @@ static inline int dr_reload_data_head( struct head_db *hd )
 	}
 
 	/* generate new blacklist from the routing info */
-	populate_dr_bls((*(hd->rdata))->pgw_l);
+	populate_dr_bls((*(hd->rdata))->pgw_tree);
 
 	if (no_concurrent_reload)
 		hd->ongoing_reload = 0;
@@ -1117,7 +1174,7 @@ static int dr_init(void)
 	struct head_config * last_cleaned = 0;
 	struct head_db * it_head_db = 0, *to_clean = 0;
 
-	head_start = NULL; //emtpy head list
+	head_start = NULL; //empty head list
 	head_end = NULL;
 
 	LM_INFO("Dynamic-Routing - initializing\n");
@@ -1133,6 +1190,20 @@ static int dr_init(void)
 		if( get_config_from_db() == -1 ) {
 			LM_ERR("Failed to get configuration from db_config\n");
 			goto error;
+		}
+
+		if (partition_pvar.s) {
+			partition_pvar.len = strlen(partition_pvar.s);
+			/* just reusing avp_spec; no need to be an AVP to work */
+			if (pv_parse_spec(&partition_pvar, &partition_spec) == 0) {
+				LM_ERR("malformed PV string: <<%s>>\n", partition_pvar.s);
+				return -1;
+			}
+
+			if (partition_spec.setf == NULL) {
+				LM_ERR("Partition_id_pvar is not WRITABLE!\n");
+				return -1;
+			}
 		}
 	} else {
 		init_db_url(db_url, 0);
@@ -1423,7 +1494,7 @@ static int dr_init(void)
 
 		if (!DB_CAPABILITY( head_db_end->db_funcs, DB_CAP_QUERY)) {
 			LM_CRIT( "database modules does not "
-					"provide QUERY functions needed by DRounting module\n");
+					"provide QUERY functions needed by DRouting module\n");
 			head_db_end->db_url.s = 0;
 			goto skip;
 		}
@@ -1735,6 +1806,9 @@ static int dr_exit(void)
 	/* destroy blacklists */
 	destroy_dr_bls();
 
+	/* destroy all callbacks */
+	destroy_dr_cbs();
+
 	return 0;
 }
 
@@ -1821,8 +1895,11 @@ static inline int get_group_id(struct sip_uri *uri, struct head_db *
 	}
 
 	if (RES_ROW_N(res) == 0) {
-		if (dr_default_grp!=-1)
+		if (dr_default_grp!=-1) {
+			(current_partition->db_funcs).free_result
+				(*(current_partition->db_con), res);
 			return dr_default_grp;
+		}
 		LM_ERR("no group for user "
 				"\"%.*s\"@\"%.*s\"\n", uri->user.len, uri->user.s,
 				uri->host.len, uri->host.s);
@@ -2207,7 +2284,7 @@ static int use_next_gw_w_part(struct sip_msg* msg,
 
 		/* we have an ID, so we can check the GW state */
 		lock_start_read( current_partition->ref_lock );
-		dst = get_gw_by_id( (*current_partition->rdata)->pgw_l, &val.s);
+		dst = get_gw_by_id( (*current_partition->rdata)->pgw_tree, &val.s);
 		if (dst && (dst->flags & DR_DST_STAT_DSBL_FLAG) == 0)
 			ok = 1;
 
@@ -2499,9 +2576,11 @@ static int do_routing(struct sip_msg* msg, dr_part_group_t * part_group,
 	str ruri;
 	str next_carrier_attrs = {NULL, 0};
 	str next_gw_attrs = {NULL, 0};
-	int ret;
+	int ret, fret;
 	char tmp;
 	char *ruri_buf;
+
+	gparam_p tmp_gparam = NULL;
 
 	ret = -1;
 	ruri_buf = NULL;
@@ -2514,12 +2593,51 @@ static int do_routing(struct sip_msg* msg, dr_part_group_t * part_group,
 			LM_ERR("Partition name is mandatory for do_routing\n");
 			return -1;
 		}
+
 		if(part_group->dr_part->type == DR_GPARAM_PART) {
-			if (to_partition(msg, part_group->dr_part, &current_partition)<0) {
+			if ((fret=to_partition(msg, part_group->dr_part, &current_partition))<0) {
 				return -1;
+			} else if (fret == 1) {
+				tmp_gparam = part_group->dr_part->v.part_name;
+				part_group->dr_part->type = DR_WILDCARD_PART;
 			}
+
 		} else if(part_group->dr_part->type == DR_PTR_PART) {
 			current_partition = part_group->dr_part->v.part;
+		}
+
+
+		if (part_group->dr_part->type == DR_WILDCARD_PART) {
+			for (current_partition = head_db_start;
+					current_partition; current_partition = current_partition->next) {
+				part_group->dr_part->v.part = current_partition;
+				part_group->dr_part->type = DR_PTR_PART;
+
+				ret=do_routing( msg, part_group, flags, whitelist);
+				if (ret > 0) {
+					if (partition_pvar.s) {
+						pv_val.rs = current_partition->partition;
+						pv_val.flags = PV_VAL_STR;
+						if (pv_set_value(msg, &partition_spec, 0, &pv_val) != 0) {
+							LM_ERR("cannot print the PV-formatted"
+									" partition string\n");
+							return -1;
+						}
+					}
+					break;
+				}
+			}
+
+			/* restore to initial state */
+			if (tmp_gparam) {
+				part_group->dr_part->type = DR_GPARAM_PART;
+			} else {
+				memset(part_group->dr_part, 0, sizeof(dr_partition_t));
+				part_group->dr_part->type = DR_WILDCARD_PART;
+			}
+
+			/* ret must be less than 0 here if nothing found */
+			return ret;
 		}
 	} else {
 		if(part_group->dr_part->type == DR_PTR_PART) {
@@ -2533,26 +2651,27 @@ static int do_routing(struct sip_msg* msg, dr_part_group_t * part_group,
 
 	/* allow no GWs if we're only trying to use DR for checking purposes */
 	if ( *(current_partition->rdata)==0 || ((flags & DR_PARAM_ONLY_CHECK) == 0
-				&& (*(current_partition->rdata))->pgw_l==0 )) {
+				&& (*(current_partition->rdata))->pgw_tree==0 )) {
 		LM_DBG("empty routing table\n");
 		goto error1;
 	}
 
-	/* do some cleanup first */
-	destroy_avps( 0, current_partition->ruri_avp, 1);
-	destroy_avps( 0, current_partition->gw_id_avp, 1);
-	destroy_avps( 0, current_partition->gw_sock_avp, 1);
-	destroy_avps( 0, current_partition->rule_attrs_avp, 1);
-	destroy_avps( 0, current_partition->gw_attrs_avp, 1);
-	destroy_avps( 0, current_partition->carrier_attrs_avp, 1);
+	/* do some cleanup first (if without the CHECK_ONLY flag) */
+	if ((flags & DR_PARAM_ONLY_CHECK) == 0) {
+		destroy_avps( 0, current_partition->ruri_avp, 1);
+		destroy_avps( 0, current_partition->gw_id_avp, 1);
+		destroy_avps( 0, current_partition->gw_sock_avp, 1);
+		destroy_avps( 0, current_partition->rule_attrs_avp, 1);
+		destroy_avps( 0, current_partition->gw_attrs_avp, 1);
+		destroy_avps( 0, current_partition->carrier_attrs_avp, 1);
 
-	if ((current_partition->gw_priprefix_avp)!=-1)
-		destroy_avps( 0, current_partition->gw_priprefix_avp, 1);
-	if ((current_partition->rule_id_avp)!=-1)
-		destroy_avps( 0, current_partition->rule_id_avp, 1);
-	if ((current_partition->rule_prefix_avp)!=-1)
-		destroy_avps( 0, current_partition->rule_prefix_avp, 1);
-
+		if ((current_partition->gw_priprefix_avp)!=-1)
+			destroy_avps( 0, current_partition->gw_priprefix_avp, 1);
+		if ((current_partition->rule_id_avp)!=-1)
+			destroy_avps( 0, current_partition->rule_id_avp, 1);
+		if ((current_partition->rule_prefix_avp)!=-1)
+			destroy_avps( 0, current_partition->rule_prefix_avp, 1);
+	}
 
 	if ( !(flags & DR_PARAM_INTERNAL_TRIGGERED) ) {
 		/* not internally triggered, so get data from SIP msg */
@@ -3012,7 +3131,7 @@ static int route2_carrier(struct sip_msg* msg, char* part_carrier,
 	}
 
 
-	if ( (*current_partition->rdata)==0 || (*current_partition->rdata)->pgw_l==0 ) {
+	if ( (*current_partition->rdata)==0 || (*current_partition->rdata)->pgw_tree==0 ) {
 		LM_DBG("empty routing table\n");
 		return -1;
 	}
@@ -3060,7 +3179,7 @@ static int route2_carrier(struct sip_msg* msg, char* part_carrier,
 	/* ref the data for reading */
 	lock_start_read( current_partition->ref_lock );
 
-	cr = get_carrier_by_id( (*current_partition->rdata)->carriers, &id );
+	cr = get_carrier_by_id( (*current_partition->rdata)->carriers_tree, &id );
 	if (cr==NULL) {
 		LM_ERR("carrier <%.*s> was not found\n", id.len, id.s );
 		goto error;
@@ -3197,7 +3316,7 @@ static int route2_gw(struct sip_msg* msg, char* ch_part_gw, char* gw_att_pv)
 	}
 
 
-	if ( (*current_partition->rdata)==0 || (*current_partition->rdata)->pgw_l==0 ) {
+	if ( (*current_partition->rdata)==0 || (*current_partition->rdata)->pgw_tree==0 ) {
 		LM_DBG("empty routing table\n");
 		return -1;
 	}
@@ -3251,7 +3370,7 @@ static int route2_gw(struct sip_msg* msg, char* ch_part_gw, char* gw_att_pv)
 			return -1;
 		} else {
 			LM_DBG("found and looking for gw id <%.*s>,len=%d\n",id.len, id.s, id.len);
-			gw = get_gw_by_id( (*current_partition->rdata)->pgw_l, &id );
+			gw = get_gw_by_id( (*current_partition->rdata)->pgw_tree, &id );
 			if (gw==NULL) {
 				LM_ERR("no GW found with ID <%.*s> -> ignorring\n", id.len, id.s);
 			} else if ( push_gw_for_usage(msg, current_partition, &uri, gw, NULL, NULL, idx ) ) {
@@ -3340,6 +3459,12 @@ int fxup_get_partition(void ** part_name, dr_partition_t ** x) {
 	if( ((gparam_p)(*part_name))->type==GPARAM_TYPE_STR ) { /* was
 															   defined statically */
 		str_part_name = (( (gparam_p) (*part_name))->v.sval);
+		str_trim_spaces_lr(str_part_name);
+		if (str_part_name.len == 1 && str_part_name.s[0] == '*') {
+			(*x)->type = DR_WILDCARD_PART;
+			return 0;
+		}
+
 		if((part = get_partition(&str_part_name)) == NULL) {
 			LM_CRIT("Partition <%.*s> was not found.\n", str_part_name.len,
 					str_part_name.s);
@@ -3363,6 +3488,14 @@ static int to_partition(struct sip_msg* msg, dr_partition_t *part,
 		LM_ERR("Failed to parse avp/pve.\n");
 		return -1;
 	}
+
+	str_trim_spaces_lr(part_name);
+
+	/* check for wildcard operator */
+	if ( part_name.len == 1 && part_name.s[0] == '*') {
+		return 1;
+	}
+
 	if((*current_partition = get_partition(&part_name)) == NULL) {
 		LM_ERR("Partition <%.*s> was not found.\n", part_name.len, part_name.s);
 		return -1;
@@ -3873,20 +4006,48 @@ static int gw_matches_ip(pgw_t *pgwa, struct ip_addr *ip, unsigned short port)
 static int _is_dr_gw(struct sip_msg* msg, char * part,
 		char * flags_pv, int type, struct ip_addr *ip,
 		unsigned int port) {
+
+	int ret=-1;
+	pv_value_t pv_val;
+
 	struct head_db * it;
 	if(use_partitions) {
 		if(part == NULL || ((dr_partition_t*)part)->type == DR_NO_PART) {
 			LM_ERR("Partition is mandatory!\n");
 			return -1;
-		} else if(((dr_partition_t*)part)->type == DR_PTR_PART) {
+		}
+
+		if(((dr_partition_t*)part)->type == DR_PTR_PART) {
 			return _is_dr_gw_w_part(msg, (char*)((dr_partition_t*)part)->v.part,
 					flags_pv, type, ip, port);
 		} else if(((dr_partition_t*)part)->type == DR_GPARAM_PART) {
-			if(to_partition(msg, (dr_partition_t*)part, &it) < 0) {
+			if((ret=to_partition(msg, (dr_partition_t*)part, &it) < 0)) {
 				return -1;
+			} else if (ret == 0) {
+				return _is_dr_gw_w_part(msg, (char*)it,flags_pv, type, ip, port);
 			}
-			return _is_dr_gw_w_part(msg, (char*)it,flags_pv, type, ip, port);
 		}
+
+		/* if we got here we have the wildcard operator */
+		for (it = head_db_start; it; it = it->next) {
+			ret = _is_dr_gw_w_part(msg, (char *)it, flags_pv, type, ip, port);
+			if (ret > 0) {
+				if (partition_pvar.s) {
+					pv_val.rs = it->partition;
+					pv_val.flags = PV_VAL_STR;
+					if (pv_set_value(msg, &partition_spec, 0, &pv_val) != 0) {
+						LM_ERR("cannot print the PV-formatted"
+								" partition string\n");
+						return -1;
+					}
+				}
+				return ret;
+			}
+		}
+
+		return ret;
+
+
 	} else {
 		if( head_db_start == NULL ) {
 			LM_ERR("Error loading config.");
@@ -3915,6 +4076,9 @@ static int _is_dr_gw_w_part(struct sip_msg* msg, char * part, char* flags_pv,
 	int i;
 	struct head_db *current_partition = (struct head_db *)part;
 
+	void** dest;
+	map_iterator_t gw_it, cr_it;
+
 	if(current_partition == NULL || current_partition->rdata==NULL
 			|| *current_partition->rdata==NULL || msg==NULL)
 		return -1;
@@ -3932,14 +4096,21 @@ static int _is_dr_gw_w_part(struct sip_msg* msg, char * part, char* flags_pv,
 				case 'i': flags |= DR_IFG_IDS_FLAG; break;
 				case 'n': flags |= DR_IFG_IGNOREPORT_FLAG; break;
 				case 'c': flags |= DR_IFG_CARRIERID_FLAG; break;
-				default: LM_WARN("unsuported flag %c \n",flags_s.s[i]);
+				default: LM_WARN("unsupported flag %c \n",flags_s.s[i]);
 			}
 		}
 	}
 
 	if(current_partition->rdata!=NULL && *current_partition->rdata!=NULL) {
-		pgwa = (*current_partition->rdata)->pgw_l;
-		while(pgwa) {
+		for (map_first((*current_partition->rdata)->pgw_tree, &gw_it);
+			iterator_is_valid(&gw_it); iterator_next(&gw_it)) {
+
+			dest = iterator_val(&gw_it);
+			if (dest==NULL)
+				break;
+
+			pgwa = (pgw_t*)*dest;
+
 			if( (type<0 || type==pgwa->type) &&
 			gw_matches_ip( pgwa, ip, (flags&DR_IFG_IGNOREPORT_FLAG)?0:port )) {
 				/* strip ? */
@@ -3974,8 +4145,15 @@ static int _is_dr_gw_w_part(struct sip_msg* msg, char * part, char* flags_pv,
 
 				if ( flags & DR_IFG_CARRIERID_FLAG ) {
 					/* lookup first carrier that contains this gw */
-					for (pcr=(*current_partition->rdata)->carriers;pcr;
-					pcr=pcr->next) {
+					for (map_first((*current_partition->rdata)->carriers_tree, &cr_it);
+							iterator_is_valid(&cr_it); iterator_next(&cr_it)) {
+
+						dest = iterator_val(&cr_it);
+						if (dest==NULL)
+							break;
+
+						pcr = (pcr_t*)*dest;
+
 						for (i=0;i<pcr->pgwa_len;i++) {
 							if (pcr->pgwl[i].is_carrier == 0 &&
 									pcr->pgwl[i].dst.gw == pgwa ) {
@@ -4196,6 +4374,9 @@ static struct mi_root* mi_dr_gw_status(struct mi_root *cmd, void *param)
 	str *id;
 	int old_flags;
 
+	void** dest;
+	map_iterator_t it;
+
 	node = cmd->node.kids;
 
 
@@ -4216,7 +4397,15 @@ static struct mi_root* mi_dr_gw_status(struct mi_root *cmd, void *param)
 			goto error;
 		rpl_tree->node.flags |= MI_IS_ARRAY;
 
-		for( gw=(*current_partition->rdata)->pgw_l ; gw ; gw=gw->next ) {
+		for (map_first((*current_partition->rdata)->pgw_tree, &it);
+				iterator_is_valid(&it); iterator_next(&it)) {
+
+			dest = iterator_val(&it);
+			if (dest==NULL)
+				return NULL;
+
+			gw = (pgw_t*)*dest;
+
 			node = add_mi_node_child( &rpl_tree->node, MI_DUP_VALUE,
 					"ID", 2, gw->id.s, gw->id.len);
 			if (node==NULL) goto error;
@@ -4247,7 +4436,7 @@ static struct mi_root* mi_dr_gw_status(struct mi_root *cmd, void *param)
 	id =  &node->value;
 
 	/* search for the Gw */
-	gw = get_gw_by_id( (*current_partition->rdata)->pgw_l, id);
+	gw = get_gw_by_id( (*current_partition->rdata)->pgw_tree, id);
 	if (gw==NULL) {
 		rpl_tree = init_mi_tree( 404, MI_SSTR("GW ID not found"));
 		goto done;
@@ -4325,6 +4514,9 @@ static struct mi_root* mi_dr_cr_status(struct mi_root *cmd, void *param)
 	str *id;
 	int old_flags;
 
+	void** dest;
+	map_iterator_t it;
+
 	node = cmd->node.kids;
 
 	if( (rpl_tree = mi_w_partition(&node, &current_partition))
@@ -4346,7 +4538,14 @@ static struct mi_root* mi_dr_cr_status(struct mi_root *cmd, void *param)
 			goto error;
 		rpl_tree->node.flags |= MI_IS_ARRAY;
 
-		for( cr=(*current_partition->rdata)->carriers ; cr ; cr=cr->next ) {
+		for (map_first((*current_partition->rdata)->carriers_tree, &it);
+				iterator_is_valid(&it); iterator_next(&it)) {
+			dest = iterator_val(&it);
+			if (dest==NULL)
+				return NULL;
+
+			cr = (pcr_t*)*dest;
+
 			node = add_mi_node_child( &rpl_tree->node, MI_DUP_VALUE,
 					"ID", 2, cr->id.s, cr->id.len);
 			if (node==NULL) goto error;
@@ -4362,7 +4561,7 @@ static struct mi_root* mi_dr_cr_status(struct mi_root *cmd, void *param)
 	id =  &node->value;
 
 	/* search for the Carrier */
-	cr = get_carrier_by_id( (*current_partition->rdata)->carriers, id);
+	cr = get_carrier_by_id( (*current_partition->rdata)->carriers_tree, id);
 	if (cr==NULL) {
 		rpl_tree = init_mi_tree( 404, MI_SSTR("Carrier ID not found"));
 		goto done;

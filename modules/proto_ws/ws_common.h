@@ -335,7 +335,7 @@ static enum ws_close_code inline ws_parse(struct ws_req *req)
 			clen = WS_ELENC(req);
 			if ((clen+WS_MIN_HDR_LEN+WS_ELENC_SIZE+WS_IF_MASK_SIZE(req))>
 					TCP_BUF_SIZE) {
-				LM_ERR("packet too large, can't fit: %lu\n", clen);
+				LM_ERR("packet too large, can't fit: %" PRIu64 "\n", clen);
 				req->tcp.error = TCP_REQ_OVERRUN;
 				return WS_ERR_TOO_BIG;
 			}
@@ -531,7 +531,7 @@ again:
 					"keeping connection \n");
 			}
 
-			if (receive_msg(msg_buf, msg_len, &local_rcv) <0)
+			if (receive_msg(msg_buf, msg_len, &local_rcv, NULL) <0)
 					LM_ERR("receive_msg failed \n");
 
 			*req->tcp.parsed = bk;
@@ -556,8 +556,11 @@ again:
 		if (size)
 			goto again;
 		/* cleanup the existing request */
-		if (req != &_ws_common_current_req)
+		if (req != &_ws_common_current_req) {
+			/* make sure we cleanup the request in the connection */
+			con->con_req = NULL;
 			pkg_free(req);
+		}
 
 	} else {
 		/* request not complete - check the if the thresholds are exceeded */

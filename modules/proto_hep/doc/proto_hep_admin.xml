@@ -15,14 +15,17 @@
 		part is done internally.</para>
 	</section>
 	<para>
-		Once loaded, you will be able to define HEP listeners in your script,
-		by adding its IP, and optionally the listening port, in your configuration
-		file, similar to this example:
+		Once loaded, you will be able to define HEP listeners in your
+		configuration file by adding their IP and, optionally, a listening port.
+		You can define both TCP and UDP listeners. On UDP you will be able to
+		receive HEP v1, v2 and v3 packets, on TCP only HEPv3.
 	<para>
 		<programlisting format="linespecific">
 ...
-listen=hep:127.0.0.1 		# change the listening IP
-listen=hep:127.0.0.1:5080	# change with the listening IP and port
+#HEPv3 listener
+listen = hep_tcp:127.0.0.1:6061 		# change the listening IP
+#HEPv1, v2, v3 listener
+listen = hep_udp:127.0.0.1:6061 		# change the listening IP
 ...
 </programlisting>
 	</para>
@@ -106,12 +109,12 @@ modparam("proto_hep", "hep_send_timeout", 200)
 	<section>
 		<title><varname>hep_max_msg_chunks</varname> (integer)</title>
 		<para>
-			The maximum number of chunks that a HEP message is expected to
-			arrive via TCP. If a packet is received more fragmented than this,
+			The maximum number of chunks in which a HEP message is expected to
+			arrive via TCP. If a received packet is more fragmented than this,
 			the connection is dropped (either the connection is very
 			overloaded and this leads to high fragmentation - or we are the
-			victim of an ongoing attack where the attacker is sending the
-			traffic very fragmented in order to decrease our performance).
+			victim of an ongoing attack where the attacker is sending very
+			fragmented traffic in order to decrease server performance).
 		</para>
 		<para>
 		<emphasis>
@@ -130,9 +133,9 @@ modparam("proto_hep", "hep_max_msg_chunks", 8)
 	<section>
 		<title><varname>hep_async</varname> (integer)</title>
 		<para>
-			If the TCP connect and write operations should be done in an
-			asynchronous mode (non-blocking connect and
-			write). If disabled, OpenSIPS will block and wait for TCP
+			Specifies whether the TCP connect and write operations should be
+			done in an asynchronous mode (non-blocking connect and
+			write) or not. If disabled, OpenSIPS will block and wait for TCP
 			operations like connect and write.
 		</para>
 		<para>
@@ -167,28 +170,6 @@ modparam("proto_bin", "hep_async", 0)
 		<programlisting format="linespecific">
 ...
 modparam("proto_hep", "hep_async_max_postponed_chunks", 16)
-...
-</programlisting>
-		</example>
-	</section>
-	<section>
-		<title><varname>hep_version</varname> (integer)</title>
-		<para>
-		The parameter indicate the version of HEP protocol.
-		Can be 1, 2 or 3. In HEPv2 the timestamp and capture agent ID will
-		be included to HEP header. Version 1 and 2 uses UDP and version 3
-		uses TCP.
-		</para>
-		<para>
-		<emphasis>
-			Default value is "3".
-		</emphasis>
-		</para>
-		<example>
-		<title>Set <varname>hep_version</varname> parameter</title>
-		<programlisting format="linespecific">
-...
-modparam("proto_hep", "hep_version", 2)
 ...
 </programlisting>
 		</example>

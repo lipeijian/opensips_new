@@ -126,6 +126,9 @@
 int ruri_matching=1;
 int via1_matching=1;
 
+/* by default we automaticaly send 100 Trying on trasacation creation */
+int auto_100trying=1;
+
 /* this is a global variable which keeps pointer to
    transaction currently processed by a process; it it
    set by t_lookup_request or t_reply_matching; don't
@@ -144,6 +147,8 @@ static struct cell *cancelled_T;
  * transaction (when processing a end-to-end 200 ACK )
  */
 static struct cell *e2eack_T;
+
+static str relay_reason_100 = str_init("Giving a try");
 
 
 struct cell *get_t(void) { return T; }
@@ -1002,6 +1007,7 @@ static inline int new_t(struct sip_msg *p_msg, int full_uas)
 int t_newtran( struct sip_msg* p_msg, int full_uas )
 {
 	int lret, my_err;
+	context_p ctx_backup;
 
 	/* is T still up-to-date ? */
 	LM_DBG("transaction on entrance=%p\n",T);
@@ -1100,6 +1106,13 @@ int t_newtran( struct sip_msg* p_msg, int full_uas )
 		put_on_wait( T );
 		t_unref(p_msg);
 		return E_BAD_VIA;
+	}
+
+	if (auto_100trying && p_msg->REQ_METHOD==METHOD_INVITE) {
+		ctx_backup = current_processing_ctx;
+		current_processing_ctx = NULL;
+		t_reply( T, p_msg , 100 , &relay_reason_100);
+		current_processing_ctx = ctx_backup;
 	}
 
 	return 1;

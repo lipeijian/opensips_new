@@ -144,9 +144,9 @@ int db_check_api(db_func_t* dbf, char *mname)
 		dbf->cap |= DB_CAP_INSERT_UPDATE;
 	}
 
-	if (dbf->async_raw_query || dbf->async_raw_resume) {
-		if (!dbf->async_raw_query || !dbf->async_raw_resume) {
-			LM_BUG("NULL async_raw_query_f or async_raw_resume_f in %s", mname);
+	if (dbf->async_raw_query || dbf->async_resume || dbf->async_free_result) {
+		if (!dbf->async_raw_query || !dbf->async_resume || !dbf->async_free_result) {
+			LM_BUG("NULL async raw_query | resume | free_result in %s", mname);
 			return -1;
 		}
 
@@ -428,7 +428,7 @@ int db_table_version(const db_func_t* dbf, db_con_t* connection, const str* tabl
 
 /*
  * Check the table version
- * 0 means ok, -1 means an error occured
+ * 0 means ok, -1 means an error occurred
  */
 int db_check_table_version(db_func_t* dbf, db_con_t* dbh, const str* table, const unsigned int version)
 {

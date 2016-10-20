@@ -29,6 +29,7 @@
 #ifndef LB_LB_DATA_H_
 #define LB_LB_DATA_H_
 
+#include "../../mod_fix.h"
 #include "../../str.h"
 #include "../../locking.h"
 #include "../../parser/msg_parser.h"
@@ -72,6 +73,7 @@ struct lb_dst {
 	struct lb_resource_map *rmap;
 	struct ip_addr ips[LB_MAX_IPS]; /* IP-Address of the entry */
 	unsigned short int ports[LB_MAX_IPS]; /* Port of the request URI */
+	unsigned short int protos[LB_MAX_IPS]; /* Protocol of the request URI */
 	unsigned short ips_cnt;
 	struct lb_dst *next;
 };
@@ -103,7 +105,7 @@ int do_lb_is_started(struct sip_msg *req);
 int do_lb_disable_dst(struct sip_msg *req, struct lb_data *data, unsigned int verbose);
 
 int lb_is_dst(struct lb_data *data, struct sip_msg *_m,
-		pv_spec_t *pv_ip, pv_spec_t *pv_port, int group, int active);
+		pv_spec_t *pv_ip, gparam_t *pv_port, int group, int active);
 
 int lb_count_call(struct lb_data *data, struct sip_msg *req,
 		struct ip_addr *ip, int port, int group, struct lb_res_str_list *rl, int dir);

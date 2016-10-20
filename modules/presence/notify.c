@@ -1083,9 +1083,9 @@ str* get_p_notify_body(str pres_uri, pres_ev_t* event, str* etag, str* publ_body
 
 			if(row_vals[extra_hdrs_col].val.string_val!= NULL)
 			{
-				if (extra_hdrs && !extra_hdrs->s)
+				len = strlen(row_vals[extra_hdrs_col].val.string_val);
+				if (len > 0 && extra_hdrs && !extra_hdrs->s)
 				{
-					len = strlen(row_vals[extra_hdrs_col].val.string_val);
 					extra_hdrs->s = (char*)pkg_malloc(len);
 					if (extra_hdrs->s == NULL)
 					{
@@ -1098,7 +1098,8 @@ str* get_p_notify_body(str pres_uri, pres_ev_t* event, str* etag, str* publ_body
 
 			if(row_vals[body_col].val.string_val== NULL)
 			{
-				LM_ERR("NULL notify body record\n");
+				if (event->mandatory_body)
+					LM_ERR("NULL notify body record\n");
 				goto error;
 			}
 			len= strlen(row_vals[body_col].val.string_val);
@@ -1150,9 +1151,9 @@ str* get_p_notify_body(str pres_uri, pres_ev_t* event, str* etag, str* publ_body
 
 				if(row_vals[extra_hdrs_col].val.string_val!= NULL)
 				{
-					if (extra_hdrs && !extra_hdrs->s)
+					len = strlen(row_vals[extra_hdrs_col].val.string_val);
+					if (len > 0 && extra_hdrs && !extra_hdrs->s)
 					{
-						len = strlen(row_vals[extra_hdrs_col].val.string_val);
 						extra_hdrs->s = (char*)pkg_malloc(len);
 						if (extra_hdrs->s == NULL)
 						{
@@ -1202,9 +1203,9 @@ str* get_p_notify_body(str pres_uri, pres_ev_t* event, str* etag, str* publ_body
 
 				if(row_vals[extra_hdrs_col].val.string_val!= NULL)
 				{
-					if (extra_hdrs && !extra_hdrs->s)
+					len = strlen(row_vals[extra_hdrs_col].val.string_val);
+					if (len > 0 && extra_hdrs && !extra_hdrs->s)
 					{
-						len = strlen(row_vals[extra_hdrs_col].val.string_val);
 						extra_hdrs->s = (char*)pkg_malloc(len);
 						if (extra_hdrs->s == NULL)
 						{

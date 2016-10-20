@@ -483,10 +483,8 @@ modparam("tls_mgm", "verify_cert", "1:1")
    Example 1.11. Set tls_handshake_timeout & tls_send_timeout
    variable
 ...
-modparam("tls_mgm", "tls_handshake_timeout", 119)               # number
- of seconds
-modparam("tls_mgm", "tls_send_timeout", 121)                    # number
- of seconds
+modparam("tls_mgm", "tls_handshake_timeout", 119) # number of seconds
+modparam("tls_mgm", "tls_send_timeout", 121) # number of seconds
 ...
 
 1.7.12. client_domain_avp (integer)
@@ -501,8 +499,7 @@ modparam("tls_mgm", "tls_send_timeout", 121)                    # number
 
    Example 1.12. Set tls_client_domain_avp variable
 ...
-modparam("tls_mgm", "tls_client_domain_avp", "400")             # only i
-nteger named AVPs are supported
+modparam("tls_mgm", "tls_client_domain_avp", "400")
 ...
 
 1.7.13.  db_mode (integer)
@@ -959,8 +956,7 @@ route{
 
    Example 1.33. Script with TLS support
   # ----------- global configuration parameters ------------------------
-  debug=3
-  fork=yes
+  log_level=3
   log_stderror=no
 
   check_via=no
@@ -1135,103 +1131,97 @@ route{
    TLS pseudo variables.
 
    Example 1.34. Example of TLS logging
-xlog("L_INFO","==================== start TLS pseudo variables =========
-========='\n");
-xlog("L_INFO","$$tls_version                    = '$tls_version'\n");
-xlog("L_INFO","$$tls_description                = '$tls_description'\n")
+xlog("L_INFO","================= start TLS pseudo variables ============
+===\n");
+xlog("L_INFO","$$tls_version                   = '$tls_version'\n");
+xlog("L_INFO","$$tls_description               = '$tls_description'\n");
+xlog("L_INFO","$$tls_cipher_info               = '$tls_cipher_info'\n");
+xlog("L_INFO","$$tls_cipher_bits               = '$tls_cipher_bits'\n");
+xlog("L_INFO","$$tls_peer_subject              = '$tls_peer_subject'\n")
 ;
-xlog("L_INFO","$$tls_cipher_info                = '$tls_cipher_info'\n")
+xlog("L_INFO","$$tls_peer_issuer               = '$tls_peer_issuer'\n");
+xlog("L_INFO","$$tls_my_subject                = '$tls_my_subject'\n");
+xlog("L_INFO","$$tls_my_issuer                 = '$tls_my_issuer'\n");
+xlog("L_INFO","$$tls_peer_version              = '$tls_peer_version'\n")
 ;
-xlog("L_INFO","$$tls_cipher_bits                = '$tls_cipher_bits'\n")
-;
-xlog("L_INFO","$$tls_peer_subject               = '$tls_peer_subject'\n"
-);
-xlog("L_INFO","$$tls_peer_issuer                = '$tls_peer_issuer'\n")
-;
-xlog("L_INFO","$$tls_my_subject                 = '$tls_my_subject'\n");
-xlog("L_INFO","$$tls_my_issuer                  = '$tls_my_issuer'\n");
-xlog("L_INFO","$$tls_peer_version               = '$tls_peer_version'\n"
-);
-xlog("L_INFO","$$tls_my_version                 = '$tls_my_version'\n");
-xlog("L_INFO","$$tls_peer_serial                = '$tls_peer_serial'\n")
-;
-xlog("L_INFO","$$tls_my_serial                  = '$tls_my_serial'\n");
-xlog("L_INFO","$$tls_peer_subject_cn            = '$tls_peer_subject_cn'
-\n");
-xlog("L_INFO","$$tls_peer_issuer_cn             = '$tls_peer_issuer_cn'\
+xlog("L_INFO","$$tls_my_version                = '$tls_my_version'\n");
+xlog("L_INFO","$$tls_peer_serial               = '$tls_peer_serial'\n");
+xlog("L_INFO","$$tls_my_serial                 = '$tls_my_serial'\n");
+xlog("L_INFO","$$tls_peer_subject_cn           = '$tls_peer_subject_cn'\
 n");
-xlog("L_INFO","$$tls_my_subject_cn              = '$tls_my_subject_cn'\n
+xlog("L_INFO","$$tls_peer_issuer_cn            = '$tls_peer_issuer_cn'\n
 ");
-xlog("L_INFO","$$tls_my_issuer_cn               = '$tls_my_issuer_cn'\n"
+xlog("L_INFO","$$tls_my_subject_cn             = '$tls_my_subject_cn'\n"
 );
-xlog("L_INFO","$$tls_peer_subject_locality      = '$tls_peer_subject_loc
-ality'\n");
-xlog("L_INFO","$$tls_peer_issuer_locality       = '$tls_peer_issuer_loca
+xlog("L_INFO","$$tls_my_issuer_cn              = '$tls_my_issuer_cn'\n")
+;
+xlog("L_INFO","$$tls_peer_subject_locality     = '$tls_peer_subject_loca
 lity'\n");
-xlog("L_INFO","$$tls_my_subject_locality        = '$tls_my_subject_local
+xlog("L_INFO","$$tls_peer_issuer_locality      = '$tls_peer_issuer_local
 ity'\n");
-xlog("L_INFO","$$tls_my_issuer_locality         = '$tls_my_issuer_locali
+xlog("L_INFO","$$tls_my_subject_locality       = '$tls_my_subject_locali
 ty'\n");
-xlog("L_INFO","$$tls_peer_subject_country       = '$tls_peer_subject_cou
-ntry'\n");
-xlog("L_INFO","$$tls_peer_issuer_country        = '$tls_peer_issuer_coun
-try'\n");
-xlog("L_INFO","$$tls_my_subject_country         = '$tls_my_subject_count
-ry'\n");
-xlog("L_INFO","$$tls_my_issuer_country          = '$tls_my_issuer_countr
+xlog("L_INFO","$$tls_my_issuer_locality        = '$tls_my_issuer_localit
 y'\n");
-xlog("L_INFO","$$tls_peer_subject_state         = '$tls_peer_subject_sta
-te'\n");
-xlog("L_INFO","$$tls_peer_issuer_state          = '$tls_peer_issuer_stat
-e'\n");
-xlog("L_INFO","$$tls_my_subject_state           = '$tls_my_subject_state
+xlog("L_INFO","$$tls_peer_subject_country      = '$tls_peer_subject_coun
+try'\n");
+xlog("L_INFO","$$tls_peer_issuer_country       = '$tls_peer_issuer_count
+ry'\n");
+xlog("L_INFO","$$tls_my_subject_country        = '$tls_my_subject_countr
+y'\n");
+xlog("L_INFO","$$tls_my_issuer_country         = '$tls_my_issuer_country
 '\n");
-xlog("L_INFO","$$tls_my_issuer_state            = '$tls_my_issuer_state'
+xlog("L_INFO","$$tls_peer_subject_state        = '$tls_peer_subject_stat
+e'\n");
+xlog("L_INFO","$$tls_peer_issuer_state         = '$tls_peer_issuer_state
+'\n");
+xlog("L_INFO","$$tls_my_subject_state          = '$tls_my_subject_state'
 \n");
-xlog("L_INFO","$$tls_peer_subject_organization  = '$tls_peer_subject_org
-anization'\n");
-xlog("L_INFO","$$tls_peer_issuer_organization   = '$tls_peer_issuer_orga
+xlog("L_INFO","$$tls_my_issuer_state           = '$tls_my_issuer_state'\
+n");
+xlog("L_INFO","$$tls_peer_subject_organization = '$tls_peer_subject_orga
 nization'\n");
-xlog("L_INFO","$$tls_my_subject_organization    = '$tls_my_subject_organ
+xlog("L_INFO","$$tls_peer_issuer_organization  = '$tls_peer_issuer_organ
 ization'\n");
-xlog("L_INFO","$$tls_my_issuer_organization     = '$tls_my_issuer_organi
+xlog("L_INFO","$$tls_my_subject_organization   = '$tls_my_subject_organi
 zation'\n");
-xlog("L_INFO","$$tls_peer_subject_unit          = '$tls_peer_subject_uni
-t'\n");
-xlog("L_INFO","$$tls_peer_issuer_unit           = '$tls_peer_issuer_unit
+xlog("L_INFO","$$tls_my_issuer_organization    = '$tls_my_issuer_organiz
+ation'\n");
+xlog("L_INFO","$$tls_peer_subject_unit         = '$tls_peer_subject_unit
 '\n");
-xlog("L_INFO","$$tls_my_subject_unit            = '$tls_my_subject_unit'
+xlog("L_INFO","$$tls_peer_issuer_unit          = '$tls_peer_issuer_unit'
 \n");
-xlog("L_INFO","$$tls_my_issuer_unit             = '$tls_my_issuer_unit'\
+xlog("L_INFO","$$tls_my_subject_unit           = '$tls_my_subject_unit'\
 n");
-xlog("L_INFO","$$tls_peer_san_email             = '$tls_peer_san_email'\
-n");
-xlog("L_INFO","$$tls_my_san_email               = '$tls_my_san_email'\n"
-);
-xlog("L_INFO","$$tls_peer_san_hostname          = '$tls_peer_san_hostnam
-e'\n");
-xlog("L_INFO","$$tls_my_san_hostname            = '$tls_my_san_hostname'
-\n");
-xlog("L_INFO","$$tls_peer_san_uri               = '$tls_peer_san_uri'\n"
-);
-xlog("L_INFO","$$tls_my_san_uri                 = '$tls_my_san_uri'\n");
-xlog("L_INFO","$$tls_peer_san_ip                = '$tls_peer_san_ip'\n")
+xlog("L_INFO","$$tls_my_issuer_unit            = '$tls_my_issuer_unit'\n
+");
+xlog("L_INFO","$$tls_peer_san_email            = '$tls_peer_san_email'\n
+");
+xlog("L_INFO","$$tls_my_san_email              = '$tls_my_san_email'\n")
 ;
-xlog("L_INFO","$$tls_my_san_ip                  = '$tls_my_san_ip'\n");
-xlog("L_INFO","$$tls_peer_verified              = '$tls_peer_verified'\n
-");
-xlog("L_INFO","$$tls_peer_revoked               = '$tls_peer_revoked'\n"
-);
-xlog("L_INFO","$$tls_peer_expired               = '$tls_peer_expired'\n"
-);
-xlog("L_INFO","$$tls_peer_selfsigned            = '$tls_peer_selfsigned'
-\n");
-xlog("L_INFO","$$tls_peer_notBefore             = '$tls_peer_notBefore'\
+xlog("L_INFO","$$tls_peer_san_hostname         = '$tls_peer_san_hostname
+'\n");
+xlog("L_INFO","$$tls_my_san_hostname           = '$tls_my_san_hostname'\
 n");
-xlog("L_INFO","$$tls_peer_notAfter              = '$tls_peer_notAfter'\n
+xlog("L_INFO","$$tls_peer_san_uri              = '$tls_peer_san_uri'\n")
+;
+xlog("L_INFO","$$tls_my_san_uri                = '$tls_my_san_uri'\n");
+xlog("L_INFO","$$tls_peer_san_ip               = '$tls_peer_san_ip'\n");
+xlog("L_INFO","$$tls_my_san_ip                 = '$tls_my_san_ip'\n");
+xlog("L_INFO","$$tls_peer_verified             = '$tls_peer_verified'\n"
+);
+xlog("L_INFO","$$tls_peer_revoked              = '$tls_peer_revoked'\n")
+;
+xlog("L_INFO","$$tls_peer_expired              = '$tls_peer_expired'\n")
+;
+xlog("L_INFO","$$tls_peer_selfsigned           = '$tls_peer_selfsigned'\
+n");
+xlog("L_INFO","$$tls_peer_notBefore            = '$tls_peer_notBefore'\n
 ");
-xlog("L_INFO","==================== end TLS pseudo variables ===========
-======='\n");
+xlog("L_INFO","$$tls_peer_notAfter             = '$tls_peer_notAfter'\n"
+);
+xlog("L_INFO","================= end TLS pseudo variables ==============
+=\n");
 
 Chapter 2. Developer Guide
 

@@ -311,7 +311,7 @@ static int fixup_is_dst(void** param, int param_no)
 			*param = NULL;
 			return 0;
 		}
-		return fixup_pvar(param);
+		return fixup_igp(param);
 	} else if (param_no==3) {
 		/* the group to check in */
 		return fixup_igp(param);
@@ -692,7 +692,7 @@ static int w_lb_is_dst2(struct sip_msg *msg, char *ip, char *port)
 
 	lock_start_read( ref_lock );
 
-	ret = lb_is_dst(*curr_data, msg, (pv_spec_t*)ip, (pv_spec_t*)port, -1, 0);
+	ret = lb_is_dst(*curr_data, msg, (pv_spec_t*)ip, (gparam_t*)port, -1, 0);
 
 	lock_stop_read( ref_lock );
 
@@ -720,7 +720,7 @@ static int w_lb_is_dst4(struct sip_msg *msg,char *ip,char *port,char *grp,
 
 	lock_start_read( ref_lock );
 
-	ret = lb_is_dst(*curr_data, msg, (pv_spec_t*)ip, (pv_spec_t*)port,
+	ret = lb_is_dst(*curr_data, msg, (pv_spec_t*)ip, (gparam_t*)port,
 	                group, (int)(long)active);
 
 	lock_stop_read( ref_lock );
@@ -761,15 +761,10 @@ static int w_lb_count_call(struct sip_msg *req, char *ip, char *port, char *grp,
 
 	/* get the port */
 	if (port) {
-		if (pv_get_spec_value( req, (pv_spec_t*)port, &val)!=0) {
+		if (fixup_get_ivalue( req, (gparam_p)port, &port_no)!=0) {
 			LM_ERR("failed to get PORT value from PV\n");
 			return -1;
 		}
-		if ( (val.flags&PV_VAL_INT)==0 ) {
-			LM_ERR("PORT PV val is not integer\n");
-			return -1;
-		}
-		port_no = val.ri;
 	} else {
 		port_no = 0;
 	}

@@ -71,7 +71,7 @@ int exec_msg(struct sip_msg *msg, char *cmd )
 
 	LM_DBG("Forked pid %d\n", pid);
 
-	if (fwrite(msg->buf, 1, msg->len, pipe)!=msg->len) {
+	if (fwrite(msg->buf, 1, msg->len, pipe)!=msg->len || fflush(pipe)) {
 		LM_ERR("failed to write to pipe\n");
 		ser_error=E_EXEC;
 		goto error01;
@@ -553,7 +553,7 @@ int start_async_exec(struct sip_msg* msg, str* command, str* input,
 	}
 	val = fcntl( *fd, F_GETFL);
 	if (val==-1){
-		LM_ERR("fnctl failed: (%d) %s\n", errno, strerror(errno));
+		LM_ERR("fcntl failed: (%d) %s\n", errno, strerror(errno));
 		goto error2;
 	}
 	if (fcntl( *fd , F_SETFL, val|O_NONBLOCK)==-1){

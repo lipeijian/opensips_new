@@ -57,6 +57,7 @@
 #include "../rr/api.h"
 #include "../../bin_interface.h"
 #include "../clusterer/api.h"
+#include "../../lib/container.h"
 
 #include "dlg_hash.h"
 #include "dlg_timer.h"
@@ -80,13 +81,13 @@ str rr_param = {"did",3};
 static int dlg_hash_size = 4096;
 static str timeout_spec = {NULL, 0};
 static int default_timeout = 60 * 60 * 12;  /* 12 hours */
-static int options_ping_interval = 30;      /* seconds */
-static int reinvite_ping_interval = 300;    /* seconds */
 static char* profiles_wv_s = NULL;
 static char* profiles_nv_s = NULL;
 
 int dlg_bulk_del_no = 1; /* delete one by one */
 int seq_match_mode = SEQ_MATCH_STRICT_ID;
+int options_ping_interval = 30;      /* seconds */
+int reinvite_ping_interval = 300;    /* seconds */
 str dlg_extra_hdrs = {NULL,0};
 
 /* statistic variables */
@@ -461,7 +462,7 @@ static int fixup_get_profile2(void** param, int param_no)
 			return E_SCRIPT;
 		}
 
-		p = list_entry(param, action_elem_t, u.data);
+		p = container_of(param, action_elem_t, u.data);
 		p++;
 		p->u.data = *param;
 
@@ -661,7 +662,7 @@ int load_dlg( struct dlg_binds *dlgb )
 	dlgb->is_mod_flag_set = is_mod_flag_set_wrapper;
 
 	dlgb->ref_dlg = ref_dlg;
-	dlgb->unref_dlg = unref_dlg;
+	dlgb->unref_dlg = unref_dlg_destroy_safe;
 
 	dlgb->get_rr_param = get_rr_param;
 
@@ -891,13 +892,13 @@ static int mod_init(void)
 	}
 
 	if ( register_timer( "dlg-options-pinger", dlg_options_routine, NULL,
-	options_ping_interval, TIMER_FLAG_DELAY_ON_DELAY)<0) {
+	1 /* check every second if we need to ping */, TIMER_FLAG_DELAY_ON_DELAY)<0) {
 		LM_ERR("failed to register timer 2\n");
 		return -1;
 	}
 
 	if ( register_timer( "dlg-reinvite-pinger", dlg_reinvite_routine, NULL,
-	reinvite_ping_interval, TIMER_FLAG_DELAY_ON_DELAY)<0) {
+	1 /* check every second if we need to ping */, TIMER_FLAG_DELAY_ON_DELAY)<0) {
 		LM_ERR("failed to register timer 2\n");
 		return -1;
 	}
@@ -980,11 +981,10 @@ static int child_init(int rank)
 		if_update_stat(dlg_enable_stats, early_dlgs, early_dlgs_cnt);
 	}
 
-	if ( (dlg_db_mode==DB_MODE_REALTIME &&
-		(rank>=PROC_MAIN || rank==PROC_MODULE)) ||
-	(dlg_db_mode==DB_MODE_SHUTDOWN && (rank==(dont_fork?1:PROC_MAIN) ||
-		rank==PROC_MODULE) ) ||
-	(dlg_db_mode==DB_MODE_DELAYED && (rank>=PROC_MAIN || rank==PROC_MODULE) )
+	if (
+	(dlg_db_mode==DB_MODE_REALTIME && (rank>=PROC_MAIN||rank==PROC_MODULE)) ||
+	(dlg_db_mode==DB_MODE_SHUTDOWN && (rank==PROC_MAIN||rank==PROC_MODULE)) ||
+	(dlg_db_mode==DB_MODE_DELAYED  && (rank>=PROC_MAIN||rank==PROC_MODULE))
 	){
 		if ( dlg_connect_db(&db_url) ) {
 			LM_ERR("failed to connect to database (rank=%d)\n",rank);
@@ -1739,12 +1739,23 @@ int pv_set_dlg_timeout(struct sip_msg *msg, pv_param_t *param,
 		if (db_update)
 			update_dialog_timeout_info(dlg);
 
-		replicate_dialog_updated(dlg);
+		if (dialog_replicate_cluster)
+			replicate_dialog_updated(dlg);
 
-		if (timer_update && update_dlg_timer(&dlg->tl, timeout) < 0) {
-			LM_ERR("failed to update timer\n");
-			return -1;
+		if (timer_update) {
+			switch ( update_dlg_timer(&dlg->tl, timeout) ) {
+			case -1:
+				LM_ERR("failed to update timer\n");
+				return -1;
+			case 1:
+				/* dlg inserted in timer list with new expire (reference it)*/
+				ref_dlg(dlg,1);
+			case 0:
+				/* timeout value was updated */
+				break;
+			}
 		}
+
 	} else if (current_processing_ctx) {
 		/* store it until we match the dialog */
 		ctx_timeout_set( timeout );

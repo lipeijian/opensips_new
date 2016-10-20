@@ -572,7 +572,7 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 			return -1;
 		}
 	} else {
-		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(17):(16), 0,
+		if (ul_dbf.query(_c, 0, 0, 0, columns, 0, (use_domain)?(18):(17), 0,
 		&res) < 0) {
 			LM_ERR("db_query failed\n");
 			return -1;
@@ -672,7 +672,7 @@ int preload_udomain(db_con_t* _c, udomain_t* _d)
 
 			if ( (c=mem_insert_ucontact(r, &contact, ci)) == 0) {
 				LM_ERR("inserting contact failed\n"
-						"Found a bad contact with id:[%ld] "
+						"Found a bad contact with id:[%" PRIu64 "] "
 						"aor:[%.*s] contact:[%.*s] received:[%.*s]!\n"
 						"Will continue but that contact needs to be REMOVED!!\n",
 						ci->contact_id,
@@ -764,11 +764,11 @@ urecord_t* db_load_urecord(db_con_t* _c, udomain_t* _d, str *_aor)
 	if (desc_time_order)
 		order = &last_mod_col;
 
+	memset(vals, 0, sizeof vals);
+
 	vals[0].type = DB_STR;
-	vals[0].nul = 0;
 	if (use_domain) {
 		vals[1].type = DB_STR;
-		vals[1].nul = 0;
 		domain = q_memchr(_aor->s, '@', _aor->len);
 		vals[0].val.str_val.s   = _aor->s;
 		if (domain==0) {
@@ -848,12 +848,12 @@ int db_timer_udomain(udomain_t* _d)
 		ops[1] = "!=";
 	}
 
+	memset(vals, 0, sizeof vals);
+
 	vals[0].type = DB_DATETIME;
-	vals[0].nul = 0;
 	vals[0].val.time_val = act_time + 1;
 
 	vals[1].type = DB_DATETIME;
-	vals[1].nul = 0;
 	vals[1].val.time_val = 0;
 
 	CON_PS_REFERENCE(ul_dbh) = &my_ps;

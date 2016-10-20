@@ -11,7 +11,7 @@
 # History:
 # --------
 #              created by andrei
-#  2003-02-24  added LOCALBASE, fixed doc-dir for freebsd - patch provided
+#  2003-02-24  added LOCALBASE, fixed doc_dir for freebsd - patch provided
 #               by Maxim Sobolev <sobomax@FreeBSD.org>
 #  2003-02-25  added -DDISABLE_NAGLE (andrei)
 #  2003-03-02  added -DDIGEST_DOMAIN (janakj)
@@ -61,12 +61,12 @@ MAIN_NAME=opensips
 
 #version number
 VERSION_MAJOR = 2
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 VERSION_SUBMINOR = 0
 VERSION_BUILD = dev
 
 ifneq (,$(VERSION_BUILD))
-RELEASE=$(VERSION_MAJOR).$(VERSION_MINOR)-$(VERSION_BUILD)
+RELEASE=$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_SUBMINOR)-$(VERSION_BUILD)
 else
 RELEASE=$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_SUBMINOR)
 endif
@@ -154,7 +154,7 @@ ifneq (,$(findstring clang, $(CC_LONGVER)))
 				 sed -e 's/\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/' )
 	CC_CLASS=$(shell echo "$(CC_SHORTVER)" | \
 				 sed -e 's/2\.9.*/2.9x/' -e 's/3\.[0-9]/3.x/' \
-				 -e 's/4\.[0-9]/4.x/' -e 's/5\.[0-9]/4.x/')
+				 -e 's/[4-9]\.[0-9]/4.x/')
 
 else ifneq (,$(findstring gcc, $(CC_LONGVER)))
 	CC_NAME=gcc
@@ -167,10 +167,10 @@ else ifneq (,$(findstring gcc, $(CC_LONGVER)))
 				 sed -e 's/[^0-9]*-\(.*\)/\1/'| \
 				 sed -e 's/\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/' )
 	#transform gcc version into 2.9x, 3.x or 4.x
-	#XXX: for now treag 5.x the same as 4.x
+	#XXX: for now treat 4+.x the same as 4.x
 	CC_CLASS=$(shell echo "$(CC_SHORTVER)" | \
 				 sed -e 's/2\.9.*/2.9x/' -e 's/3\.[0-9]/3.x/' \
-				 -e 's/4\.[0-9]/4.x/' -e 's/5\.[0-9]/4.x/')
+				 -e 's/[4-9]\.[0-9]/4.x/')
 endif
 
 ifneq (, $(findstring Sun, $(CC_LONGVER)))
@@ -222,6 +222,7 @@ ppc64_macros= __ppc64__ _ARCH_PPC64
 mips_macros= __mips__ __mips _MIPS_ARCH_MIPS1
 mips2_macros= _MIPS_ISA_MIPS2 _MIPS_ISA_MIPS3 _MIPS_ISA_MIPS4 \
 			_MIPS_ARCH_MIPS2 _MIPS_ARCH_MIPS3 _MIPS_ARCH_MIPS4
+mips32_macros= _MIPS_ISA_MIPS32 _MIPS_ARCH_MIPS32R2 _MIPS_ARCH_MIPS32
 mips64_macros= _MIPS_ISA_MIPS64 _MIPS_ARCH_MIPS64
 
 alpha_macros= __alpha__ __alpha _M_ALPHA_
@@ -259,6 +260,8 @@ else ifneq ($(strip $(filter $(mips_macros), $(predef_macros))),)
 
 ifneq ($(strip $(filter $(mips64_macros), $(predef_macros))),)
 CC_ARCH=mips64
+else ifneq ($(strip $(filter $(mips32_macros), $(predef_macros))),)
+CC_ARCH=mips32
 else ifneq ($(strip $(filter $(mips2_macros), $(predef_macros))),)
 CC_ARCH=mips2
 else # mips2_macros
@@ -316,8 +319,8 @@ CROSS_COMPILE ?=
 SYSBASE ?= /usr
 
 # dirs
-cfg-dir = etc/$(MAIN_NAME)/
-bin-dir = sbin/
+cfg_dir = etc/$(MAIN_NAME)/
+bin_dir = sbin/
 
 ARCH_B = $(shell echo $(ARCH) | sed -e 's/.*64.*/64b/')
 ifeq ($(ARCH_B),64b)
@@ -328,54 +331,54 @@ else
 	ARCH_B=32b
 endif
 
-lib-dir = $(LIBDIR)/$(MAIN_NAME)
-modules-dir = $(LIBDIR)/$(MAIN_NAME)/modules/
+lib_dir = $(LIBDIR)/$(MAIN_NAME)
+modules_dir = $(LIBDIR)/$(MAIN_NAME)/modules/
 
 ifeq ($(OS), linux)
-	doc-dir = share/doc/$(MAIN_NAME)/
-	man-dir = share/man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)/
+	man_dir = share/man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/local
 else
 ifeq ($(OS), freebsd)
-	doc-dir = share/doc/$(MAIN_NAME)/
-	man-dir = man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)/
+	man_dir = man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/local
 else
 ifeq ($(OS), openbsd)
-	doc-dir = share/doc/$(MAIN_NAME)/
-	man-dir = man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)/
+	man_dir = man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/local
 else
 ifeq ($(OS), netbsd)
-	doc-dir = share/doc/$(MAIN_NAME)
-	man-dir = man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)
+	man_dir = man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/pkg
 else
 ifeq ($(OS), darwin)
-	doc-dir = share/doc/$(MAIN_NAME)/
-	man-dir = man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)/
+	man_dir = man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/local
 else
 ifeq ($(OS), gnu_kfreebsd)
-	doc-dir = share/doc/$(MAIN_NAME)/
-	man-dir = share/man/
-	data-dir = share/$(MAIN_NAME)/
+	doc_dir = share/doc/$(MAIN_NAME)/
+	man_dir = share/man/
+	data_dir = share/$(MAIN_NAME)/
 	LOCALBASE = ?= $(SYSBASE)/local
 else
 ifeq ($(OS), solaris)
-	doc-dir = doc/$(MAIN_NAME)/
-	man-dir = man/
-	data-dir = $(MAIN_NAME)/
+	doc_dir = doc/$(MAIN_NAME)/
+	man_dir = man/
+	data_dir = $(MAIN_NAME)/
 	LOCALBASE = $(SYSBASE)
 else
-	doc-dir = doc/$(MAIN_NAME)/
-	man-dir = man/
-	data-dir = $(MAIN_NAME)/
+	doc_dir = doc/$(MAIN_NAME)/
+	man_dir = man/
+	data_dir = $(MAIN_NAME)/
 	LOCALBASE ?= $(SYSBASE)/local
 endif
 endif
@@ -398,21 +401,21 @@ prefix = $(PREFIX)
 BASEDIR ?=
 basedir = $(BASEDIR)
 # install prefixes for various stuff
-cfg-prefix = $(basedir)$(prefix)
-bin-prefix = $(basedir)$(prefix)
-modules-prefix = $(basedir)$(prefix)
-doc-prefix = $(basedir)$(prefix)
-man-prefix = $(basedir)$(prefix)
-ut-prefix = $(basedir)$(prefix)
-data-prefix = $(basedir)$(prefix)
+cfg_prefix = $(basedir)$(prefix)
+bin_prefix = $(basedir)$(prefix)
+modules_prefix = $(basedir)$(prefix)
+doc_prefix = $(basedir)$(prefix)
+man_prefix = $(basedir)$(prefix)
+ut_prefix = $(basedir)$(prefix)
+data_prefix = $(basedir)$(prefix)
 
 # target dirs for various stuff
-cfg-target = $(prefix)/$(cfg-dir)
-bin-target = $(prefix)/$(bin-dir)
-lib-target = $(prefix)/$(lib-dir)
-modules-target = $(prefix)/$(modules-dir)
-doc-target = $(prefix)/$(doc-dir)
-data-target = $(prefix)/$(data-dir)
+cfg_target = $(prefix)/$(cfg_dir)
+bin-target = $(prefix)/$(bin_dir)
+lib-target = $(prefix)/$(lib_dir)
+modules_target = $(prefix)/$(modules_dir)
+doc-target = $(prefix)/$(doc_dir)
+data_target = $(prefix)/$(data_dir)
 
 
 ifeq ($(OS), solaris)
@@ -593,7 +596,7 @@ MKTAGS=ctags -R .
 DEFS+= $(extra_defs) \
 	 -DNAME='"$(MAIN_NAME)"' -DVERSION='"$(RELEASE)"' -DARCH='"$(ARCH)"' \
 	 -DOS='"$(OS)"' -DCOMPILER='"$(CC_VER)"' -D__CPU_$(ARCH) -D__OS_$(OS) \
-	 -D__SMP_$(ISSMP) -DCFG_DIR='"$(cfg-target)"'\
+	 -D__SMP_$(ISSMP) -DCFG_DIR='"$(cfg_target)"'\
 
 #PROFILE=  -pg #set this if you want profiling
 
@@ -605,11 +608,19 @@ ifneq ($(VERSIONTYPE),)
 	DEFS+= -DVERSIONTYPE='"$(VERSIONTYPE)"' -DTHISREVISION='"$(THISREVISION)"'
 endif
 
-ifneq ($(FREERADIUS),)
-	DEFS+= -DUSE_FREERADIUS
-	RADIUS_LIB= -lfreeradius-client
-else
+ifneq ($(RADIUSCLIENT), RADCLI)
+ifneq ($(RADIUSCLIENT), FREERADIUS)
+ifeq ($(RADIUSCLIENT), RADIUSCLIENT)
+	DEFS+= -DRADIUSCLIENT
 	RADIUS_LIB= -lradiusclient-ng
+endif
+else
+	DEFS+= -DFREERADIUS
+	RADIUS_LIB= -lfreeradius-client
+endif
+else
+	DEFS+= -DRADCLI
+	RADIUS_LIB= -lradcli
 endif
 
 ifneq ($(SQLITE_BIND),)
@@ -701,6 +712,11 @@ ifeq ($(ARCH), arm)
 	use_fast_lock=yes
 endif
 
+# use need some asm code for locking before enabling this
+#ifeq ($(ARCH), arm6)
+#	use_fast_lock=yes
+#endif
+
 ifeq ($(ARCH), ppc)
 	use_fast_lock=yes
 endif
@@ -719,17 +735,55 @@ ifeq ($(ARCH), mips2)
 	use_fast_lock=yes
 endif
 
+ifeq ($(ARCH), mips32)
+        use_fast_lock=yes
+endif
+
+ifeq ($(ARCH), mips64)
+        use_fast_lock=yes
+endif
+
 ifeq ($(ARCH), alpha)
 	use_fast_lock=yes
 endif
 
+# decide on the locking type
+ifeq (,$(findstring USE_PTHREAD_MUTEX, $(DEFS)))
+ifeq (,$(findstring USE_POSIX_SEM, $(DEFS)))
+ifeq (,$(findstring USE_SYSV_SEM, $(DEFS)))
 ifeq ($(use_fast_lock), yes)
 	DEFS+= -DFAST_LOCK -DADAPTIVE_WAIT -DADAPTIVE_WAIT_LOOPS=1024
+	found_lock_method=yes
+endif
+else
+	## USE_SYSV_SEM was manually forced from .conf
+	found_lock_method=yes
+endif
+else
+	## USE_POSIX_SEM was manually forced from .conf
+	found_lock_method=yes
+endif
+else
+	## USE_PTHREAD_MUTEX was manually forced from .conf
 	found_lock_method=yes
 endif
 
 CFLAGS=$(shell echo "$${CFLAGS}")
 LDFLAGS+=
+
+ifneq (,$(findstring DBG_MALLOC, $(DEFS)))
+	CC_OPTIMIZE_FLAG?=-O0
+endif
+
+ifeq	($(CC_NAME), gcc)
+	CC_OPTIMIZE_FLAG?=-O9
+endif
+ifeq	($(CC_NAME), icc)
+	CC_OPTIMIZE_FLAG?=-O3
+endif
+ifeq	($(CC_NAME), clang)
+	CC_OPTIMIZE_FLAG?=-O3
+endif
 
 ifeq (,$(CFLAGS))
 
@@ -747,7 +801,7 @@ ifeq	($(ARCH), i386)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-m32 -O9 -funroll-loops  -Wcast-align $(PROFILE) \
+				CFLAGS+=-m32 $(CC_OPTIMIZE_FLAG) -funroll-loops  -Wcast-align $(PROFILE) \
 					-Wall
 				LDFLAGS+=-m32
 			#if gcc 4.0+
@@ -793,7 +847,7 @@ endif			# CC_CLASS, 4.x
 
 else		# CC_NAME, gcc
 ifeq		($(CC_NAME), icc)
-			CFLAGS+=-O3  -ipo -ipo_obj -unroll  $(PROFILE) \
+			CFLAGS+=$(CC_OPTIMIZE_FLAG)  -ipo -ipo_obj -unroll  $(PROFILE) \
 					 -tpp6 -xK  #-openmp  #optimize for PIII
 				# -prefetch doesn't seem to work
 				#( ty to inline acroos files, unroll loops,prefetch,
@@ -806,7 +860,7 @@ ifeq		($(CC_NAME), suncc)
 			# -Dinline="" # add this if cc < 5.3 (define inline as null)
 else
 ifeq		($(CC_NAME), clang)
-			CFLAGS+=-O3 -funroll-loops
+			CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops
 else
 				#other compilers
 $(error 			Unsupported compiler ($(CC):$(CC_NAME)), try gcc)
@@ -825,7 +879,7 @@ ifeq	($(ARCH), x86_64)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops  -Wcast-align $(PROFILE) \
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops  -Wcast-align $(PROFILE) \
 					-Wall
 			#if gcc 4.0+
 ifeq			($(CC_CLASS), 4.x)
@@ -860,7 +914,7 @@ endif			# CC_CLASS, 4.x
 
 else		# CC_NAME, gcc
 ifeq		($(CC_NAME), icc)
-			CFLAGS+=-O3 -ipo -ipo_obj -unroll  $(PROFILE) \
+			CFLAGS+=$(CC_OPTIMIZE_FLAG) -ipo -ipo_obj -unroll  $(PROFILE) \
 					 -tpp6 -xK  #-openmp  #optimize for PIII
 				# -prefetch doesn't seem to work
 				#( ty to inline acroos files, unroll loops,prefetch,
@@ -873,7 +927,7 @@ ifeq		($(CC_NAME), suncc)
 				# -Dinline="" # add this if cc < 5.3 (define inline as null)
 else
 ifeq		($(CC_NAME), clang)
-			CFLAGS+=-O3 -funroll-loops
+			CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops
 else
 				#other compilers
 $(error 			Unsupported compiler ($(CC):$(CC_NAME)), try gcc)
@@ -888,7 +942,7 @@ ifeq	($(ARCH), sparc64)
 			#if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops  $(PROFILE) \
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops  $(PROFILE) \
 					-Wall\
 					#-Wcast-align \
 					#-Wmissing-prototypes
@@ -1029,8 +1083,8 @@ ifeq	($(ARCH), arm)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops  -Wcast-align $(PROFILE) \
-					-Wall
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops  -Wcast-align $(PROFILE) \
+					-Wall -marm
 			#if gcc 4.x+
 ifeq			($(CC_CLASS), 4.x)
 					CFLAGS+=-mcpu=strongarm1100 -minline-all-stringops \
@@ -1065,7 +1119,7 @@ ifeq	($(ARCH), mips)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops  -Wcast-align $(PROFILE) \
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops  -Wcast-align $(PROFILE) \
 					-Wall
 			#if gcc 4.0+
 ifeq			($(CC_CLASS), 4.x)
@@ -1102,7 +1156,7 @@ ifeq	($(ARCH), mips2)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -mips2 -funroll-loops $(PROFILE) \
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -mips2 -funroll-loops $(PROFILE) \
 					-Wall
 			#if gcc 4.0+
 ifeq			($(CC_CLASS), 4.x)
@@ -1136,7 +1190,7 @@ ifeq	($(ARCH), alpha)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops $(PROFILE)  -Wall
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops $(PROFILE)  -Wall
 			#if gcc 4.0+
 ifeq			($(CC_CLASS), 4.x)
 					CFLAGS+=-minline-all-stringops
@@ -1169,7 +1223,7 @@ ifeq	($(ARCH), ppc)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops $(PROFILE)  -Wall
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops $(PROFILE)  -Wall
 			#if gcc 4.0+
 ifeq			($(CC_CLASS), 4.x)
 					CPU_TYPE ?= powerpc
@@ -1204,7 +1258,7 @@ ifeq	($(ARCH), ppc64)
 		# if gcc
 ifeq		($(CC_NAME), gcc)
 				#common stuff
-				CFLAGS+=-O9 -funroll-loops $(PROFILE)  -Wall
+				CFLAGS+=$(CC_OPTIMIZE_FLAG) -funroll-loops $(PROFILE)  -Wall
 ifeq			($(CC_CLASS), 4.x)
 					CPU_TYPE ?= powerpc64
 					CFLAGS+=-ftree-vectorize \
@@ -1323,8 +1377,11 @@ ifeq ($(OS), linux)
 			-DHAVE_MSG_NOSIGNAL -DHAVE_MSGHDR_MSG_CONTROL -DHAVE_ALLOCA_H \
 			-DHAVE_TIMEGM
 	ifneq ($(found_lock_method), yes)
-		DEFS+= -DUSE_SYSV_SEM  # try posix sems
+		DEFS+= -DUSE_POSIX_SEM  # try posix sems
 		found_lock_method=yes
+	endif
+	ifneq (,$(findstring USE_PTHREAD_MUTEX, $(DEFS)))
+		LIBS += -pthread
 	endif
 	# check for >= 2.5.44
 	ifeq ($(shell [ $(OSREL_N) -ge 2005044 ] && echo has_epoll), has_epoll)
@@ -1550,6 +1607,13 @@ ifneq (,$(findstring CYGWIN, $(OS)))
 		DEFS+= -DUSE_SYSV_SEM  # try sys v sems
 		found_lock_method=yes
 	endif
+endif
+
+#if POSIX sems are to be used, be sure to link with ptread
+ifneq (,$(findstring USE_POSIX_SEM, $(DEFS)))
+ifeq (,$(findstring pthread, $(LIBS)))
+LIBS+= -pthread
+endif
 endif
 
 #add libsctp if needed

@@ -66,17 +66,17 @@ static void tcp_conn_clean(struct tcp_connection* c);
 /* default port for TCP protocol */
 static int tcp_port = SIP_PORT;
 
-/* in miliseconds */
+/* in milliseconds */
 static int tcp_send_timeout = 100;
 
 /* 1 if TCP connect & write should be async */
 static int tcp_async = 1;
 
-/* Number of miliseconds that a worker will block waiting for a local
+/* Number of milliseconds that a worker will block waiting for a local
  * connect - if connect op exceeds this, it will get passed to TCP main*/
 static int tcp_async_local_connect_timeout = 100;
 
-/* Number of miliseconds that a worker will block waiting for a local
+/* Number of milliseconds that a worker will block waiting for a local
  * write - if write op exceeds this, it will get passed to TCP main*/
 static int tcp_async_local_write_timeout = 10;
 
@@ -157,6 +157,8 @@ struct module_exports proto_tcp_exports = {
 
 static int proto_tcp_init(struct proto_info *pi)
 {
+	pi->id					= PROTO_TCP;
+	pi->name				= "tcp";
 	pi->default_port		= tcp_port;
 
 	pi->tran.init_listener	= proto_tcp_init_listener;
@@ -540,7 +542,7 @@ error:
 
 /**************  WRITE related functions ***************/
 
-/* called under the TCP connection write lock, timeout is in miliseconds */
+/* called under the TCP connection write lock, timeout is in milliseconds */
 static int async_tsend_stream(struct tcp_connection *c,
 		int fd, char* buf, unsigned int len, int timeout)
 {
@@ -650,9 +652,9 @@ static int proto_tcp_send(struct socket_info* send_sock,
 	if (to){
 		su2ip_addr(&ip, to);
 		port=su_getport(to);
-		n = tcp_conn_get(id, &ip, port, &c, &fd);
+		n = tcp_conn_get(id, &ip, port, PROTO_TCP, &c, &fd);
 	}else if (id){
-		n = tcp_conn_get(id, 0, 0, &c, &fd);
+		n = tcp_conn_get(id, 0, 0, PROTO_NONE, &c, &fd);
 	}else{
 		LM_CRIT("tcp_send called with null id & to\n");
 		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
@@ -661,7 +663,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 
 	if (n<0) {
 		/* error during conn get, return with error too */
-		LM_ERR("failed to aquire connection\n");
+		LM_ERR("failed to acquire connection\n");
 		get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
 		return -1;
 	}
@@ -684,7 +686,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 				get_time_difference(get,tcpthreshold,tcp_timeout_con_get);
 				return -1;
 			}
-			/* connect succeded, we have a connection */
+			/* connect succeeded, we have a connection */
 			if (n==0) {
 				/* connect is still in progress, break the sending
 				 * flow now (the actual write will be done when 
@@ -694,7 +696,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 				return len;
 			}
 
-			LM_DBG("First connect attempt succeded in less than %d ms, "
+			LM_DBG("First connect attempt succeeded in less than %d ms, "
 				"proceed to writing \n",tcp_async_local_connect_timeout);
 			/* our first connect attempt succeeded - go ahead as normal */
 		} else if ((c=tcp_sync_connect(send_sock, to, &fd))==0) {
@@ -811,7 +813,7 @@ again:
 			/* report back we have more writting to be done */
 			return 1;
 		} else {
-			LM_ERR("Error occured while sending async chunk %d (%s)\n",
+			LM_ERR("Error occurred while sending async chunk %d (%s)\n",
 				   errno,strerror(errno));
 			/* report the conn as broken */
 			return -1;

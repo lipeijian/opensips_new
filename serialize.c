@@ -67,7 +67,7 @@ int init_serialization(void)
 
 
 /*! \brief
- * Loads contacts in destination set into "serial_fork" AVP in reverse
+ * Loads contacts in destination set into "serial_avp" AVP in reverse
  * priority order and associated each contact with Q_FLAG telling if
  * contact is the last one in its priority class.  Finally, removes
  * all branches from destination set.
@@ -86,7 +86,7 @@ int serialize_branches(struct sip_msg *msg, int clean_before )
 	int idx;
 
 	/* Check if anything needs to be done */
-	if (nr_branches == 0) {
+	if (get_nr_branches() == 0) {
 		LM_DBG("nothing to do - no branches!\n");
 		return 0;
 	}

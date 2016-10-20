@@ -1,6 +1,4 @@
 #
-# $Id$
-#
 # OpenSIPS trunking script
 #     by OpenSIPS Solutions <team@opensips-solutions.com>
 #
@@ -17,17 +15,14 @@
 
 ####### Global Parameters #########
 
-debug=3
+log_level=3
 log_stderror=no
 log_facility=LOG_LOCAL0
 
-fork=yes
 children=4
 
 /* uncomment the following lines to enable debugging */
-#debug=6
-#fork=no
-#log_stderror=yes
+#debug_mode=yes
 
 /* uncomment the next line to enable the auto temporary blacklisting of 
    not available destinations (default disabled) */
@@ -116,15 +111,9 @@ modparam("acc", "report_cancels", 0)
    if you enable this parameter, be sure the enable "append_fromtag"
    in "rr" module */
 modparam("acc", "detect_direction", 0)
-modparam("acc", "failed_transaction_flag", "ACC_FAILED")
-/* account triggers (flags) */
-ifelse(USE_DBACC,`yes',`modparam("acc", "db_flag", "ACC_DO")
-modparam("acc", "db_missed_flag", "ACC_MISSED")
-modparam("acc", "db_url",
+ifelse(USE_DBACC,`yes',`modparam("acc", "db_url",
 	"mysql://opensips:opensipsrw@localhost/opensips") # CUSTOMIZE ME
-', `modparam("acc", "log_flag", "ACC_DO")
-modparam("acc", "log_missed_flag", "ACC_MISSED")
-')
+', `')
 
 ifelse(USE_DIALOG,`yes',`#### DIALOG module
 loadmodule "dialog.so"
@@ -194,8 +183,9 @@ route{
 			}
 			',`')
 			if (is_method("BYE")) {
-				setflag(ACC_DO); # do accounting ...
-				setflag(ACC_FAILED); # ... even if the transaction fails
+				# do accounting even if the transaction fails
+				ifelse(USE_DBACC,`yes',`do_accounting("db","failed");
+				', `do_accounting("log","failed");')
 			} else if (is_method("INVITE")) {
 				# even if in most of the cases is useless, do RR for
 				# re-INVITEs alos, as some buggy clients do change route set
@@ -262,7 +252,8 @@ route{
 	# record routing
 	record_route();
 
-	setflag(ACC_DO); # do accounting
+	ifelse(USE_DBACC,`yes',`do_accounting("db");
+	', `do_accounting("log");')
 
 	ifelse(USE_DIALOG,`yes',`
 	# create dialog with timeout

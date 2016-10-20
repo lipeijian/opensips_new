@@ -227,6 +227,7 @@ int init_rl_table(unsigned int size)
 		LM_ERR("Default algorithm was not specified\n");
 		return -1;
 	}
+	rl_default_algo_s.len = strlen(rl_default_algo_s.s);
 	/* resolve the default algorithm */
 	rl_default_algo = get_rl_algo(rl_default_algo_s);
 	if (rl_default_algo == PIPE_ALGO_NOP) {
@@ -277,6 +278,7 @@ struct {
 	{ str_init("TAILDROP"), PIPE_ALGO_TAILDROP},
 	{ str_init("FEEDBACK"), PIPE_ALGO_FEEDBACK},
 	{ str_init("NETWORK"), PIPE_ALGO_NETWORK},
+	{ str_init("SBT"), PIPE_ALGO_HISTORY},
 	{
 		{ 0, 0}, 0
 	},
@@ -374,17 +376,23 @@ int w_rl_check_3(struct sip_msg *_m, char *_n, char *_l, char *_a)
 
 	if (!*pipe) {
 		/* allocate new pipe */
-		*pipe = shm_malloc(sizeof(rl_pipe_t));
+		*pipe = shm_malloc(sizeof(rl_pipe_t) +
+				/* memory for the window */
+				(rl_window_size*1000) / rl_slot_period * sizeof(long int));
 		if (!*pipe) {
 			LM_ERR("no more shm memory\n");
 			goto release;
 		}
 		memset(*pipe, 0, sizeof(rl_pipe_t));
-		LM_DBG("Pipe %.*s doens't exist, but was created %p\n",
-			name.len, name.s, *pipe);
+		LM_DBG("Pipe %.*s doesn't exist, but was created %p\n",
+				name.len, name.s, *pipe);
 		if (algo == PIPE_ALGO_NETWORK)
 			should_update = 1;
 		(*pipe)->algo = (algo == PIPE_ALGO_NOP) ? rl_default_algo : algo;
+		(*pipe)->rwin.window = (long int *)((*pipe) + 1);
+		(*pipe)->rwin.window_size   = rl_window_size * 1000 / rl_slot_period;
+		memset((*pipe)->rwin.window, 0,
+				(*pipe)->rwin.window_size * sizeof(long int));
 	} else {
 		LM_DBG("Pipe %.*s found: %p - last used %lu\n",
 			name.len, name.s, *pipe, (*pipe)->last_used);
@@ -790,14 +798,14 @@ int w_rl_reset(struct sip_msg *_m, char *_n)
 static rl_repl_counter_t* find_destination(rl_pipe_t *pipe, int machine_id)
 {
 	rl_repl_counter_t *head;
-	
+
 	head = pipe->dsts;
 	while(head != NULL){
 		if( head->machine_id ==  machine_id )
 			break;
 		head=head->next;
 	}
-	
+
 	if(head == NULL){
 		head = shm_malloc(sizeof(rl_repl_counter_t));
 		if(head == NULL){
@@ -830,7 +838,7 @@ void rl_rcv_bin(int packet_type, struct receive_info *ri, int server_id)
 	unsigned int hash_idx;
 	time_t now;
 	rl_repl_counter_t *destination;
-	
+
 	if (packet_type == SERVER_TEMP_DISABLED) {
  		get_su_info(&ri->src_su.s, ip, port);
 		LM_WARN("server: %s:%hu temporary disabled\n", ip, port);
@@ -841,7 +849,7 @@ void rl_rcv_bin(int packet_type, struct receive_info *ri, int server_id)
 		LM_INFO("server with clustererer id %d timeout\n", server_id);
 		return;
 	}
-	
+
 	if(get_bin_pkg_version() != BIN_VERSION){
 		LM_ERR("incompatible bin protocol version\n");
 		return;
@@ -921,6 +929,57 @@ release:
 	RL_RELEASE_LOCK(hash_idx);
 }
 
+/*
+ * same as hist_check() in ratelimit.c but this one
+ * only counts, no updates on the window ==> faster
+ */
+static inline int hist_count(rl_pipe_t *pipe)
+{
+	/* Window ELement*/
+	#define U2MILI(__usec__) (__usec__/1000)
+	#define S2MILI(__sec__)  (__sec__ *1000)
+	int i;
+	int first_good_index;
+	int rl_win_ms = rl_window_size * 1000;
+
+	int count=0;
+
+	unsigned long long now_total, start_total;
+
+	struct timeval tv;
+
+	gettimeofday(&tv, NULL);
+	if (pipe->rwin.start_time.tv_sec == 0) {
+		return 0;
+	} else {
+		start_total = S2MILI(pipe->rwin.start_time.tv_sec)
+							+ U2MILI(pipe->rwin.start_time.tv_usec);
+		now_total = S2MILI(tv.tv_sec) + U2MILI(tv.tv_usec);
+
+		if (now_total - start_total >= 2*rl_win_ms) {
+			/* nothing here; window is expired */
+		} else if (now_total - start_total >= rl_win_ms) {
+			first_good_index = ((((now_total - rl_win_ms) - start_total)
+						/rl_slot_period + 1) + pipe->rwin.start_index) %
+						pipe->rwin.window_size;
+
+			count = 0;
+			for (i=first_good_index; i != pipe->rwin.start_index;
+											i=(i+1)%pipe->rwin.window_size)
+				count += pipe->rwin.window[i];
+
+		} else {
+			/* count all of them; valid window */
+			for (i=0; i < pipe->rwin.window_size; i++)
+				count += pipe->rwin.window[i];
+		}
+	}
+	return count;
+
+	#undef U2MILI
+	#undef S2MILI
+}
+
 int rl_repl_init(void)
 {
 
@@ -956,6 +1015,7 @@ void rl_timer_repl(utime_t ticks, void *param)
 	str *key;
 	int nr = 0;
 	int ret;
+	int replicated = 0;
 
 	if (bin_init(&module_name, RL_PIPE_COUNTER, BIN_VERSION) < 0) {
 		LM_ERR("cannot initiate bin buffer\n");
@@ -1001,9 +1061,9 @@ void rl_timer_repl(utime_t ticks, void *param)
 			nr++;
 
 			if (ret > rl_buffer_th) {
-				/* send the buffer */
-				if (nr)
-					rl_replicate();
+				/* always replicate the pipe to "simulate" pinging */
+				rl_replicate();
+				replicated = 1;
 				if (bin_init(&module_name, RL_PIPE_COUNTER, BIN_VERSION) < 0) {
 					LM_ERR("cannot initiate bin buffer\n");
 					RL_RELEASE_LOCK(i);
@@ -1021,7 +1081,7 @@ next_map:
 		RL_RELEASE_LOCK(i);
 	}
 	/* if there is anything else to send, do it now */
-	if (nr)
+	if (!replicated)
 		rl_replicate();
 	return;
 error:

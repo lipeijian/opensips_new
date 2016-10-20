@@ -30,7 +30,9 @@
 #include "route_send.h"
 #include "event_route.h"
 #include <fcntl.h>
+#include <sched.h>
 #include <unistd.h>
+#include <sched.h>
 
 #define IS_ERR(_err) (errno == _err)
 
@@ -254,7 +256,8 @@ void event_route_handler(int rank)
 	dummy_req->first_line.u.request.method.len= 5;
 	dummy_req->first_line.u.request.uri.s= "sip:user@domain.com";
 	dummy_req->first_line.u.request.uri.len= 19;
-
+	dummy_req->rcv.src_ip.af = AF_INET;
+	dummy_req->rcv.dst_ip.af = AF_INET;
 
 	/* waiting for commands */
 	for (;;) {

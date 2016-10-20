@@ -35,6 +35,7 @@
 #include <osp/osp.h>
 #include "../rr/api.h"
 #include "../../usr_avp.h"
+#include "../../mod_fix.h"
 #include "destination.h"
 #include "usage.h"
 #include "osptoolkit.h"
@@ -148,6 +149,7 @@ static void ospRecordTransaction(
             OSP_COOKIE_SNID,
             inbound->snid);
         strncpy(buffer1, buffer2, sizeof(buffer1));
+        buffer1[sizeof(buffer1) - 1] = '\0';
     }
     if ((_osp_report_nid & OSP_REPORT_DNID) && dest->dnid[0]) {
         cookie.len = snprintf(
@@ -158,6 +160,7 @@ static void ospRecordTransaction(
             OSP_COOKIE_DNID,
             dest->dnid);
         strncpy(buffer1, buffer2, sizeof(buffer1));
+        buffer1[sizeof(buffer1) - 1] = '\0';
     }
 
     if (cookie.len < 0) {
@@ -230,14 +233,15 @@ static int ospReportUsageFromCookie(
     unsigned releasecode;
     char firstvia[OSP_STRBUF_SIZE];
     char fromdisplay[OSP_STRBUF_SIZE];
-    char from[OSP_STRBUF_SIZE];
-    char rpid[OSP_STRBUF_SIZE];
-    char pai[OSP_STRBUF_SIZE];
+    char fromuser[OSP_STRBUF_SIZE];
+    char todisplay[OSP_STRBUF_SIZE];
+    char touser[OSP_STRBUF_SIZE];
+    char paiuser[OSP_STRBUF_SIZE];
+    char rpiduser[OSP_STRBUF_SIZE];
+    char pciuser[OSP_STRBUF_SIZE];
     char divuser[OSP_STRBUF_SIZE];
     char divhost[OSP_STRBUF_SIZE];
-    char pci[OSP_STRBUF_SIZE];
-    char todisplay[OSP_STRBUF_SIZE];
-    char to[OSP_STRBUF_SIZE];
+    char pcvicid[OSP_STRBUF_SIZE];
     char nexthop[OSP_STRBUF_SIZE];
     char* snid = NULL;
     char* dnid = NULL;
@@ -336,19 +340,20 @@ static int ospReportUsageFromCookie(
 
     ospGetViaAddress(msg, firstvia, sizeof(firstvia));
     ospGetFromDisplay(msg, fromdisplay, sizeof(fromdisplay));
-    ospGetFromUserpart(msg, from, sizeof(from));
-    ospGetRpidUserpart(msg, rpid, sizeof(rpid));
-    ospGetPaiUserpart(msg, pai, sizeof(pai));
-    ospGetDiversion(msg, divuser, sizeof(divuser), divhost, sizeof(divhost));
-    ospGetPChargeInfoUserpart(msg, pci, sizeof(pci));
+    ospGetFromUser(msg, fromuser, sizeof(fromuser));
     ospGetToDisplay(msg, todisplay, sizeof(todisplay));
-    ospGetToUserpart(msg, to, sizeof(to));
+    ospGetToUser(msg, touser, sizeof(touser));
+    ospGetPaiUser(msg, paiuser, sizeof(paiuser));
+    ospGetRpidUser(msg, rpiduser, sizeof(rpiduser));
+    ospGetPciUser(msg, pciuser, sizeof(pciuser));
+    ospGetDiversion(msg, divuser, sizeof(divuser), divhost, sizeof(divhost));
+    ospGetPcvIcid(msg, pcvicid, sizeof(pcvicid));
     ospGetNextHop(msg, nexthop, sizeof(nexthop));
 
     LM_DBG("first via '%s' from '%s' to '%s' next hop '%s'\n",
         firstvia,
-        from,
-        to,
+        fromuser,
+        touser,
         nexthop);
 
     if (release == OSPC_RELEASE_DESTINATION) {
@@ -361,8 +366,8 @@ static int ospReportUsageFromCookie(
             originator = nexthop;
         }
         display = todisplay;
-        calling = to;
-        called = from;
+        calling = touser;
+        called = fromuser;
         terminator = firstvia;
         egress = receive;
     } else {
@@ -383,8 +388,8 @@ static int ospReportUsageFromCookie(
             originator = firstvia;
         }
         display = fromdisplay;
-        calling = from;
-        called = to;
+        calling = fromuser;
+        called = touser;
         terminator = nexthop;
         ingress = receive;
     }
@@ -451,12 +456,12 @@ static int ospReportUsageFromCookie(
         OSPPTransactionSetSrcNetworkId(transaction, snid);
         OSPPTransactionSetDestNetworkId(transaction, dnid);
 
-        OSPPTransactionSetFrom(transaction, OSPC_NFORMAT_DISPLAYNAME, display);
-
-        OSPPTransactionSetRemotePartyId(transaction, OSPC_NFORMAT_E164, rpid);
-        OSPPTransactionSetAssertedId(transaction, OSPC_NFORMAT_E164, pai);
+        OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_FROM, OSPC_NFORMAT_DISPLAYNAME, display);
+        OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_RPID, OSPC_NFORMAT_E164, rpiduser);
+        OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_PAI, OSPC_NFORMAT_E164, paiuser);
+        OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_PCI, OSPC_NFORMAT_E164, pciuser);
         OSPPTransactionSetDiversion(transaction, divuser, divhost);
-        OSPPTransactionSetChargeInfo(transaction, OSPC_NFORMAT_E164, pci);
+        OSPPTransactionSetChargingVector(transaction, pcvicid, NULL, NULL, NULL);
 
         OSPPTransactionSetProxyIngressAddr(transaction, ingress);
         OSPPTransactionSetProxyEgressAddr(transaction, egress);
@@ -491,6 +496,7 @@ int ospReportUsage(
     char* whorelease,
     char* ignore2)
 {
+    str relstr;
     OSPE_RELEASE release;
     char* tmp;
     char* token;
@@ -502,47 +508,48 @@ int ospReportUsage(
 
     if (callid != NULL) {
         /* Who releases the call first, 0 orig, 1 term */
-        if (sscanf(whorelease, "%d", &release) != 1 || ((release != OSPC_RELEASE_SOURCE) && (release != OSPC_RELEASE_DESTINATION))) {
-            release = OSPC_RELEASE_UNKNOWN;
-        }
-        LM_DBG("who releases the call first '%d'\n", release);
+        if (fixup_get_svalue(msg, (gparam_p)whorelease, &relstr) == 0) {
+            if ((relstr.len <= 0) || (sscanf(relstr.s, "%d", &release) != 1) || ((release != OSPC_RELEASE_SOURCE) && (release != OSPC_RELEASE_DESTINATION))) {
+                release = OSPC_RELEASE_UNKNOWN;
+            }
+            LM_DBG("who releases the call first '%d'\n", release);
 
-        if (ospGetRouteParameters(msg, parameters, sizeof(parameters)) == 0) {
-            for (token = strtok_r(parameters, ";", &tmp);
-                 token;
-                 token = strtok_r(NULL, ";", &tmp))
-            {
-                if ((strncmp(token, OSP_ORIG_COOKIE, strlen(OSP_ORIG_COOKIE)) == 0) &&
-                    (token[strlen(OSP_ORIG_COOKIE)] == '='))
+            if (ospGetRouteParam(msg, parameters, sizeof(parameters)) == 0) {
+                for (token = strtok_r(parameters, ";", &tmp);
+                     token;
+                     token = strtok_r(NULL, ";", &tmp))
                 {
-                    LM_INFO("report orig duration for call_id '%.*s'\n",
-                        callid->Length,
-                        callid->Value);
-                    ospReportUsageFromCookie(msg, token + strlen(OSP_ORIG_COOKIE) + 1, callid, release, OSPC_ROLE_SOURCE);
-                    result = MODULE_RETURNCODE_TRUE;
-                } else if ((strncmp(token, OSP_TERM_COOKIE, strlen(OSP_TERM_COOKIE)) == 0) &&
-                    (token[strlen(OSP_TERM_COOKIE)] == '='))
-                {
-                    LM_INFO("report term duration for call_id '%.*s'\n",
-                        callid->Length,
-                        callid->Value);
-                    ospReportUsageFromCookie(msg, token + strlen(OSP_TERM_COOKIE) + 1, callid, release, OSPC_ROLE_DESTINATION);
-                    result = MODULE_RETURNCODE_TRUE;
-                } else {
-                    LM_DBG("ignoring parameter '%s'\n", token);
+                    if ((strncmp(token, OSP_ORIG_COOKIE, strlen(OSP_ORIG_COOKIE)) == 0) &&
+                        (token[strlen(OSP_ORIG_COOKIE)] == '='))
+                    {
+                        LM_INFO("report orig duration for call_id '%.*s'\n",
+                            callid->Length,
+                            callid->Value);
+                        ospReportUsageFromCookie(msg, token + strlen(OSP_ORIG_COOKIE) + 1, callid, release, OSPC_ROLE_SOURCE);
+                        result = MODULE_RETURNCODE_TRUE;
+                    } else if ((strncmp(token, OSP_TERM_COOKIE, strlen(OSP_TERM_COOKIE)) == 0) &&
+                        (token[strlen(OSP_TERM_COOKIE)] == '='))
+                    {
+                        LM_INFO("report term duration for call_id '%.*s'\n",
+                            callid->Length,
+                            callid->Value);
+                        ospReportUsageFromCookie(msg, token + strlen(OSP_TERM_COOKIE) + 1, callid, release, OSPC_ROLE_DESTINATION);
+                        result = MODULE_RETURNCODE_TRUE;
+                    } else {
+                        LM_DBG("ignoring parameter '%s'\n", token);
+                    }
                 }
             }
-        }
 
-        if (result == MODULE_RETURNCODE_FALSE) {
-            LM_DBG("without orig or term OSP information\n");
-            LM_INFO("report other duration for call_id '%.*s'\n",
-               callid->Length,
-               callid->Value);
-            ospReportUsageFromCookie(msg, NULL, callid, release, OSPC_ROLE_SOURCE);
-            result = MODULE_RETURNCODE_TRUE;
+            if (result == MODULE_RETURNCODE_FALSE) {
+                LM_DBG("without orig or term OSP information\n");
+                LM_INFO("report other duration for call_id '%.*s'\n",
+                   callid->Length,
+                   callid->Value);
+                ospReportUsageFromCookie(msg, NULL, callid, release, OSPC_ROLE_SOURCE);
+                result = MODULE_RETURNCODE_TRUE;
+            }
         }
-
         OSPPCallIdDelete(&callid);
     }
 
@@ -578,6 +585,9 @@ static int ospBuildUsageFromDestination(
     ospConvertToOutAddress(dest->host, host, sizeof(host));
     ospConvertToOutAddress(dest->destdev, destdev, sizeof(destdev));
 
+    /* Must be called before BuildUsageFromScratch */
+    OSPPTransactionSetSrcSwitchId(transaction, inbound->swid);
+
     errorcode = OSPPTransactionBuildUsageFromScratch(
         transaction,
         dest->transid,
@@ -598,6 +608,8 @@ static int ospBuildUsageFromDestination(
 
     OSPPTransactionSetSrcNetworkId(transaction, inbound->snid);
     OSPPTransactionSetDestNetworkId(transaction, dest->dnid);
+
+    OSPPTransactionSetDestSwitchId(transaction, dest->swid);
 
     OSPPTransactionSetDestAudioAddr(transaction, dest->destmedia);
 
@@ -622,16 +634,19 @@ static int ospReportUsageFromDestination(
     osp_inbound* inbound,
     osp_dest* dest)
 {
-    OSPPTransactionSetFrom(transaction, OSPC_NFORMAT_DISPLAYNAME, inbound->display);
+    OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_FROM, OSPC_NFORMAT_DISPLAYNAME, inbound->fromdisplay);
+    OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_FROM, OSPC_NFORMAT_DISPLAYNAME, inbound->fromdisplay);
 
-    OSPPTransactionSetRemotePartyId(transaction, OSPC_NFORMAT_E164, inbound->rpid);
-    OSPPTransactionSetAssertedId(transaction, OSPC_NFORMAT_E164, inbound->pai);
+    OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_RPID, OSPC_NFORMAT_E164, inbound->rpiduser);
+    OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_PAI, OSPC_NFORMAT_E164, inbound->paiuser);
+    OSPPTransactionSetSIPHeader(transaction, OSPC_SIPHEADER_PCI, OSPC_NFORMAT_E164, inbound->pciuser);
     OSPPTransactionSetDiversion(transaction, inbound->divuser, inbound->divhost);
-    OSPPTransactionSetChargeInfo(transaction, OSPC_NFORMAT_E164, inbound->pci);
+
+    OSPPTransactionSetChargingVector(transaction, inbound->pcvicid, NULL, NULL, NULL);
 
     OSPPTransactionSetSrcAudioAddr(transaction, inbound->srcmedia);
 
-    OSPPTransactionSetProxyIngressAddr(transaction, inbound->ingress);
+    OSPPTransactionSetProxyIngressAddr(transaction, inbound->ingressaddr);
 
     OSPPTransactionSetCDRProxy(transaction, _osp_in_device, OSP_OPENSIPS, NULL);
 

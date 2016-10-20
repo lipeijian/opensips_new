@@ -118,7 +118,10 @@ struct module_exports exports = {
 	0,          /* per-child init function */
 };
 
-static int proto_bin_init(struct proto_info *pi) {
+static int proto_bin_init(struct proto_info *pi)
+{
+	pi->id					= PROTO_BIN;
+	pi->name				= "bin";
 	pi->default_port		= bin_port;
 
 	pi->tran.init_listener	= proto_bin_init_listener;
@@ -509,9 +512,9 @@ static int proto_bin_send(struct socket_info* send_sock,
 	if (to){
 		su2ip_addr(&ip, to);
 		port=su_getport(to);
-		n = tcp_conn_get(id, &ip, port, &c, &fd);
+		n = tcp_conn_get(id, &ip, port, PROTO_BIN, &c, &fd);
 	}else if (id){
-		n = tcp_conn_get(id, 0, 0, &c, &fd);
+		n = tcp_conn_get(id, 0, 0, PROTO_NONE, &c, &fd);
 	}else{
 		LM_CRIT("tcp_send called with null id & to\n");
 		return -1;
@@ -540,7 +543,7 @@ static int proto_bin_send(struct socket_info* send_sock,
 				LM_ERR("async TCP connect failed\n");
 				return -1;
 			}
-			/* connect succeded, we have a connection */
+			/* connect succeeded, we have a connection */
 			if (n==0) {
 				/* connect is still in progress, break the sending
 				 * flow now (the actual write will be done when 
@@ -614,41 +617,6 @@ send_it:
 
 	tcp_conn_release(c, (n<len)?1:0/*pending data in async mode?*/ );
 	return n;
-}
-
-int tcp_read(struct tcp_connection *c,struct tcp_req *r) {
-	int bytes_free, bytes_read;
-	int fd;
-
-	fd = c->fd;
-	bytes_free=TCP_BUF_SIZE- (int)(r->pos - r->buf);
-
-	if (bytes_free==0){
-		LM_ERR("buffer overrun, dropping\n");
-		r->error=TCP_REQ_OVERRUN;
-		return -1;
-	}
-again:
-	bytes_read=read(fd, r->pos, bytes_free);
-
-	if(bytes_read==-1){
-		if (errno == EWOULDBLOCK || errno == EAGAIN){
-			return 0; /* nothing has been read */
-		}else if (errno == EINTR) goto again;
-		else{
-			LM_ERR("error reading: %s\n",strerror(errno));
-			r->error=TCP_READ_ERROR;
-			return -1;
-		}
-	}else if (bytes_read==0){
-		c->state=S_CONN_EOF;
-		LM_DBG("EOF on %p, FD %d\n", c, fd);
-	}
-#ifdef EXTRA_DEBUG
-	LM_DBG("read %d bytes:\n%.*s\n", bytes_read, bytes_read, r->pos);
-#endif
-	r->pos+=bytes_read;
-	return bytes_read;
 }
 
 static int bin_handle_req(struct tcp_req *req,
@@ -759,6 +727,13 @@ static void bin_parse_headers(struct tcp_req *req){
 		req->parsed = req->pos;
 		return;
 	}
+
+	if (!is_valid_bin_packet(req->buf)) {
+		LM_ERR("Invalid packet marker, got %.4s\n", req->buf);
+		req->error = TCP_REQ_BAD_LEN;
+		return;
+	}
+
 	px = (unsigned short*)(req->buf + MARKER_SIZE);
 	req->content_len = (*px);
 	if(req->pos - req->buf == req->content_len){
@@ -776,7 +751,6 @@ static void bin_parse_headers(struct tcp_req *req){
 }
 
 static int bin_read_req(struct tcp_connection* con, int* bytes_read){
-	LM_INFO("reading from connection\n");
 
 	int bytes;
 	int total_bytes;
@@ -801,7 +775,7 @@ static int bin_read_req(struct tcp_connection* con, int* bytes_read){
 		if (req->parsed < req->pos){
 			bytes=0;
 		} else {
-			bytes=tcp_read(con,req);
+			bytes=proto_tcp_read(con,req);
 			if (bytes < 0) {
 				LM_ERR("failed to read \n");
 				goto error;

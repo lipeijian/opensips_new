@@ -39,7 +39,7 @@
 #define _XOPEN_SOURCE_EXTENDED /* same as above */
 #define __USE_XOPEN_EXTENDED /* same as above, overrides features.h */
 #define __EXTENSIONS__ /* needed on solaris: if XOPEN_SOURCE is defined
-                          struct timeval defintion from <sys/time.h> won't
+                          struct timeval definition from <sys/time.h> won't
                           be included => workarround define _EXTENSIONS_ */
 #include <signal.h>
 #include <syslog.h>
@@ -236,11 +236,6 @@ int daemonize(char* name, int * own_pgid)
 		goto error;
 	}
 
-	if (create_status_pipe() < 0) {
-		LM_ERR("failed to create status pipe");
-		goto error;
-	}
-
 	if (!no_daemon_mode) {
 		/* fork to become!= group leader*/
 		if ((pid=fork())<0){
@@ -337,7 +332,6 @@ int daemonize(char* name, int * own_pgid)
 				if (r<=0)  {
 					LM_ERR("unable to write pgid to file %s: %s\n",
 						pid_file, strerror(errno));
-					fclose(pid_stream);
 					goto error;
 				}
 			}
@@ -397,26 +391,24 @@ error:
  */
 int do_suid(const int uid, const int gid)
 {
-	if (!dont_fork) {
-		if (pid_file) {
-			/* pid file should be already created by deamonize function
-			   -> change the owner and group also
-			*/
-			if (chown( pid_file , uid?uid:-1, gid?gid:-1)!=0) {
-				LM_ERR("failed to change owner of pid file %s: %s(%d)\n",
-					pid_file, strerror(errno), errno);
-				goto error;
-			}
+	if (pid_file) {
+		/* pid file should be already created by deamonize function
+		   -> change the owner and group also
+		*/
+		if (chown( pid_file , uid?uid:-1, gid?gid:-1)!=0) {
+			LM_ERR("failed to change owner of pid file %s: %s(%d)\n",
+				pid_file, strerror(errno), errno);
+			goto error;
 		}
-		if (pgid_file) {
-			/* pgid file should be already created by deamonize function
-			   -> change the owner and group also
-			*/
-			if (chown( pgid_file , uid?uid:-1, gid?gid:-1)!=0) {
-				LM_ERR("failed to change owner of pid file %s: %s(%d)\n",
-					pgid_file, strerror(errno), errno);
-				goto error;
-			}
+	}
+	if (pgid_file) {
+		/* pgid file should be already created by deamonize function
+		   -> change the owner and group also
+		*/
+		if (chown( pgid_file , uid?uid:-1, gid?gid:-1)!=0) {
+			LM_ERR("failed to change owner of pid file %s: %s(%d)\n",
+				pgid_file, strerror(errno), errno);
+			goto error;
 		}
 	}
 
@@ -449,11 +441,12 @@ error:
 
 
 /*!
- * \brief try to increase the open file limit
- * \param target target that should be reached
+ * \brief try to increase the open file limit to the value given by the global
+ *        option "open_files_limit" ; the value is updated back in case of a
+ *        partial increase of the limit
  * \return return 0 on success, -1 on error
  */
-int increase_open_fds(unsigned int target)
+int set_open_fds_limit(void)
 {
 	struct rlimit lim, orig;
 
@@ -465,18 +458,18 @@ int increase_open_fds(unsigned int target)
 	orig=lim;
 	LM_DBG("current open file limits: %lu/%lu\n",
 			(unsigned long)lim.rlim_cur, (unsigned long)lim.rlim_max);
-	if ((lim.rlim_cur==RLIM_INFINITY) || (target<=lim.rlim_cur))
-		/* nothing to do */
+	if ((lim.rlim_cur==RLIM_INFINITY) || (open_files_limit<=lim.rlim_cur))
+		/* nothing to do (we do no reduce the limit) */
 		goto done;
-	else if ((lim.rlim_max==RLIM_INFINITY) || (target<=lim.rlim_max)){
-		lim.rlim_cur=target; /* increase soft limit to target */
-	}else{
+	if ((lim.rlim_max==RLIM_INFINITY) || (open_files_limit<=lim.rlim_max)) {
+		lim.rlim_cur=open_files_limit; /* increase soft limit to target */
+	} else {
 		/* more than the hard limit */
 		LM_INFO("trying to increase the open file limit"
 				" past the hard limit (%ld -> %d)\n",
-				(unsigned long)lim.rlim_max, target);
-		lim.rlim_max=target;
-		lim.rlim_cur=target;
+				(unsigned long)lim.rlim_max, open_files_limit);
+		lim.rlim_max=open_files_limit;
+		lim.rlim_cur=open_files_limit;
 	}
 	LM_DBG("increasing open file limits to: %lu/%lu\n",
 			(unsigned long)lim.rlim_cur, (unsigned long)lim.rlim_max);
@@ -493,11 +486,14 @@ int increase_open_fds(unsigned int target)
 			if (setrlimit(RLIMIT_NOFILE, &lim)==0){
 				LM_CRIT("maximum number of file descriptors increased to"
 					" %u\n",(unsigned)orig.rlim_max);
+				open_files_limit = orig.rlim_max;
+				goto done;
 			}
 		}
 		goto error;
 	}
 done:
+	LM_DBG("open files limit set to %d\n",open_files_limit);
 	return 0;
 error:
 	return -1;

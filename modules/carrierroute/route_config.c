@@ -51,8 +51,10 @@ static int backup_config();
  * @param ap format arguments
  */
 void conf_error(cfg_t *cfg, const char * fmt, va_list ap) {
-	// FIXME this don't seems to work reliable, produces strange error messages
-	LM_GEN1(L_ERR, (char *) fmt, ap);
+	/* FIXME this don't seems to work reliable, produces strange error messages */
+	static char buf[2048];
+	snprintf(buf, 2048, fmt, ap);
+	LM_ERR("%s\n", buf);
 }
 
 
@@ -63,7 +65,7 @@ void conf_error(cfg_t *cfg, const char * fmt, va_list ap) {
  * @param rd Pointer to the route data tree where the routing data
  * shall be loaded into
  *
- * @return 0 means ok, -1 means an error occured
+ * @return 0 means ok, -1 means an error occurred
  *
  */
 int load_config(struct rewrite_data * rd) {
@@ -234,7 +236,7 @@ static cfg_t * parse_config(void) {
  *
  * @param rd Pointer to the routing tree which shall be saved to file
  *
- * @return 0 means ok, -1 means an error occured
+ * @return 0 means ok, -1 means an error occurred
  */
 int save_config(struct rewrite_data * rd) {
 	FILE * outfile;

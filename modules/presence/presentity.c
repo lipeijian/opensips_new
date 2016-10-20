@@ -855,8 +855,6 @@ error:
 
 	if(result)
 		pa_dbf.free_result(pa_db, result);
-	if(etag.s)
-		pkg_free(etag.s);
 
 	if (notify_body.s)
 		xmlFree(notify_body.s);
@@ -1470,7 +1468,7 @@ str* xml_dialog2presence(str* pres_uri, str* body)
 	dlg_doc = xmlParseMemory(body->s, body->len);
 	if(dlg_doc == NULL)
 	{
-		LM_ERR("Wrong formated xml document\n");
+		LM_ERR("Wrong formatted xml document\n");
 		return NULL;
 	}
 	dialog_node = xmlNodeGetNodeByName(dlg_doc->children, "dialog", 0);

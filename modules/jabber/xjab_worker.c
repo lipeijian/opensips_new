@@ -1027,7 +1027,7 @@ int xj_manage_jab(char *buf, int len, int *pos, xj_jalias als, xj_jcon jbc)
 		if(!strncasecmp(type, "unsubscribed", 12))
 		{
 #ifdef XJ_EXTRA_DEBUG
-			LM_DBG("user <%s> does not allow to see his"
+			LM_DBG("user <%s> does not allow to see this"
 				" presence status\n", from);
 #endif
 			if(prc->state != XJ_PS_REFUSED)
@@ -1158,11 +1158,10 @@ int xj_send_sip_msg(str *proxy, str *to, str *from, str *msg, int *cbp)
 
 	// from correction
 	tfrom.len = 0;
-	strncpy(buf+tfrom.len, "<sip:", 5);
-	tfrom.len += 5;
+	strncpy(buf+tfrom.len, "sip:", 4);
+	tfrom.len += 4;
 	strncpy(buf+tfrom.len, from->s, from->len);
 	tfrom.len += from->len;
-	buf[tfrom.len++] = '>';
 
 	tfrom.s = buf;
 

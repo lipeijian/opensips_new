@@ -61,13 +61,13 @@ int init_pkg_mallocs(void)
 		return -1;
 	}
 	#ifdef VQ_MALLOC
-		mem_block=vqm_malloc_init(mem_pool, pkg_mem_size);
+		mem_block=vqm_malloc_init(mem_pool, pkg_mem_size, "pkg");
 	#elif F_MALLOC
-		mem_block=fm_malloc_init(mem_pool, pkg_mem_size);
+		mem_block=fm_malloc_init(mem_pool, pkg_mem_size, "pkg");
 	#elif HP_MALLOC
-		mem_block=hp_pkg_malloc_init(mem_pool, pkg_mem_size);
+		mem_block=hp_pkg_malloc_init(mem_pool, pkg_mem_size, "pkg");
 	#elif QM_MALLOC
-		mem_block=qm_malloc_init(mem_pool, pkg_mem_size);
+		mem_block=qm_malloc_init(mem_pool, pkg_mem_size, "pkg");
 	#else
 		#error "no memory allocator selected"
 	#endif
@@ -75,6 +75,13 @@ int init_pkg_mallocs(void)
 		LM_CRIT("could not initialize memory pool\n");
 		fprintf(stderr, "Given PKG mem size is not enough: %ld\n",
 			pkg_mem_size );
+		return -1;
+	}
+#elif defined USE_SHM_MEM
+	if (shm_mem_init()<0) {
+		LM_CRIT("could not initialize shared memory pool, exiting...\n");
+		 fprintf(stderr, "Too much shared memory demanded: %ld\n",
+			shm_mem_size );
 		return -1;
 	}
 #endif
@@ -190,12 +197,15 @@ void pkg_threshold_check(void)
 
 int init_shm_mallocs(void)
 {
+	#ifndef USE_SHM_MEM
 	if (shm_mem_init()<0) {
 		LM_CRIT("could not initialize shared memory pool, exiting...\n");
 		 fprintf(stderr, "Too much shared memory demanded: %ld\n",
 			shm_mem_size );
 		return -1;
 	}
+	#endif
+
 	return 0;
 }
 

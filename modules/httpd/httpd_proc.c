@@ -59,8 +59,6 @@ static const str MI_HTTP_U_URL = str_init("<html><body>"
 "Unable to parse URL!</body></html>");
 static const str MI_HTTP_U_METHOD = str_init("<html><body>"
 "Unsupported HTTP request!</body></html>");
-static const str MI_HTTP_U_CNT_TYPE = str_init("<html><body>"
-"Unsupported Content-Type!</body></html>");
 
 /**
  * Data structure to store inside elents of slinkedl_list list.
@@ -622,16 +620,27 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 		}
 	}else{
 		page = MI_HTTP_U_METHOD;
+#ifdef MHD_HTTP_NOT_ACCEPTABLE
+		ret_code = MHD_HTTP_NOT_ACCEPTABLE;
+#else
 		ret_code = MHD_HTTP_METHOD_NOT_ACCEPTABLE;
+#endif
 	}
 
 send_response:
 	if (page.s) {
-		LM_DBG("MHD_create_response_from_data [%p:%d]\n",
-			page.s, page.len);
+#if defined MHD_VERSION && MHD_VERSION >= 0x00090000
+		response = MHD_create_response_from_buffer(page.len,
+							(void*)page.s,
+							MHD_RESPMEM_MUST_COPY);
+#else
+		/* use old constructor */
 		response = MHD_create_response_from_data(page.len,
 							(void*)page.s,
 							0, 1);
+#endif
+		LM_DBG("MHD_create_response_from_data [%p:%d]\n",
+			page.s, page.len);
 	} else {
 		LM_DBG("MHD_create_response_from_callback\n");
 		response = MHD_create_response_from_callback (MHD_SIZE_UNKNOWN,

@@ -117,6 +117,33 @@ static inline int pre_print_uac_request( struct cell *t, int branch,
 			request->path_vec.len+1);
 	}
 
+	/* do the same for the advertised port & address */
+	if (request->set_global_address.len) {
+		t->uac[branch].adv_address.s = shm_resize(t->uac[branch].adv_address.s,
+			request->set_global_address.len+1);
+		if (t->uac[branch].adv_address.s==NULL) {
+			LM_ERR("shm_resize failed for storing the advertised address "
+				"(len=%d)\n",request->set_global_address.len);
+			goto error;
+		}
+		t->uac[branch].adv_address.len = request->set_global_address.len;
+		memcpy( t->uac[branch].adv_address.s, request->set_global_address.s,
+			request->set_global_address.len+1);
+	}
+	if (request->set_global_port.len) {
+		t->uac[branch].adv_port.s = shm_resize(t->uac[branch].adv_port.s,
+			request->set_global_port.len+1);
+		if (t->uac[branch].adv_port.s==NULL) {
+			LM_ERR("shm_resize failed for storing the advertised port "
+				"(len=%d)\n",request->set_global_port.len);
+			goto error;
+		}
+		t->uac[branch].adv_port.len = request->set_global_port.len;
+		memcpy( t->uac[branch].adv_port.s, request->set_global_port.s,
+			request->set_global_port.len+1);
+	}
+
+
 	/********** run route & callback ************/
 
 	/* run branch route, if any; run it before RURI's DNS lookup
@@ -430,8 +457,13 @@ error01:
 			destroy_avp_list(&t->uac[branch].user_avps);
 		if (t->uac[branch].path_vec.s)
 			shm_free(t->uac[branch].path_vec.s);
+		if (t->uac[branch].adv_address.s)
+			shm_free(t->uac[branch].adv_address.s);
+		if (t->uac[branch].adv_port.s)
+			shm_free(t->uac[branch].adv_port.s);
 		if (t->uac[branch].duri.s)
 			shm_free(t->uac[branch].duri.s);
+		memset(&t->uac[branch],0,sizeof(t->uac[branch]));
 	}
 error:
 	return ret;
@@ -446,6 +478,8 @@ int e2e_cancel_branch( struct sip_msg *cancel_msg, struct cell *t_cancel,
 	unsigned int len;
 	str bk_dst_uri;
 	str bk_path_vec;
+	str bk_adv_address;
+	str bk_adv_port;
 
 	if (t_cancel->uac[branch].request.buffer.s) {
 		LM_CRIT("buffer rewrite attempt\n");
@@ -457,9 +491,13 @@ int e2e_cancel_branch( struct sip_msg *cancel_msg, struct cell *t_cancel,
 	cancel_msg->parsed_uri_ok=0;
 	bk_dst_uri = cancel_msg->dst_uri;
 	bk_path_vec = cancel_msg->path_vec;
+	bk_adv_address = cancel_msg->set_global_address;
+	bk_adv_port = cancel_msg->set_global_port;
 
-	/* force same path as for request */
+	/* force same path & advertising as for request */
 	cancel_msg->path_vec = t_invite->uac[branch].path_vec;
+	cancel_msg->set_global_address = t_invite->uac[branch].adv_address;
+	cancel_msg->set_global_port = t_invite->uac[branch].adv_port;
 
 	if ( pre_print_uac_request( t_cancel, branch, cancel_msg)!= 0 ) {
 		ret = -1;
@@ -501,6 +539,8 @@ error01:
 		&bk_dst_uri);
 	cancel_msg->dst_uri = bk_dst_uri;
 	cancel_msg->path_vec = bk_path_vec;
+	cancel_msg->set_global_address = bk_adv_address;
+	cancel_msg->set_global_port = bk_adv_port;
 error:
 	return ret;
 }
@@ -582,6 +622,7 @@ void cancel_invite(struct sip_msg *cancel_msg,
 int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 	struct proxy_l * proxy)
 {
+	str reply_reason_487 = str_init("Request Terminated");
 	str backup_uri;
 	str backup_dst;
 	int branch_ret, lowest_ret;
@@ -613,8 +654,20 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 	}
 
 	/* do not forward requests which were already cancelled*/
-	if (was_cancelled(t) || no_new_branches(t)) {
-		LM_ERR("discarding fwd for a cancelled/6xx transaction\n");
+	if (no_new_branches(t)) {
+		LM_INFO("discarding fwd for a 6xx transaction\n");
+		ser_error = E_NO_DESTINATION;
+		return -1;
+	}
+	if (was_cancelled(t)) {
+		/* is this the first attempt of sending a branch out ? */
+		if (t->nr_of_outgoings==0) {
+			/* if no other signalling was performed on the transaction
+			 * and the transaction was already canceled, better
+			 * internally generate the 487 reply here */
+			t_reply( t, p_msg , 487 , &reply_reason_487);
+		}
+		LM_INFO("discarding fwd for a cancelled transaction\n");
 		ser_error = E_NO_DESTINATION;
 		return -1;
 	}
@@ -625,6 +678,7 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 	bk_sock = p_msg->force_send_socket;
 	bk_path = p_msg->path_vec;
 	bk_bflags = p_msg->ruri_bflags;
+	/* advertised address/port are not changed */
 
 	/* check if the UAS retranmission port needs to be updated */
 	if ( (p_msg->msg_flags ^ t->uas.request->msg_flags) & FL_FORCE_RPORT )

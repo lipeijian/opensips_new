@@ -127,7 +127,11 @@ struct dlg_cell
 	unsigned int         h_entry;
 	unsigned int         state;
 	unsigned int         lifetime;
-	unsigned int         lifetime_dirty; /* 1 if lifetime timer should be updated */
+	unsigned short       lifetime_dirty; /* 1 if lifetime timer should
+	                                      * be updated */
+	unsigned short       locked_by;   /* holds the ID of the process locking
+	                                   * the dialog (if the case) while
+	                                   * calling a callback */
 	unsigned int         start_ts;    /* start time  (absolute UNIX ts)*/
 	unsigned int         flags;
 	unsigned int         from_rr_nb;
@@ -337,6 +341,12 @@ void next_state_dlg(struct dlg_cell *dlg, int event, int dir, int *old_state,
 
 struct mi_root * mi_print_dlgs(struct mi_root *cmd, void *param );
 struct mi_root * mi_print_dlgs_ctx(struct mi_root *cmd, void *param );
+
+static inline void unref_dlg_destroy_safe(struct dlg_cell *dlg, unsigned int cnt)
+{
+	if (d_table)
+		unref_dlg(dlg, cnt);
+}
 
 static inline int match_dialog(struct dlg_cell *dlg, str *callid,
 			str *ftag, str *ttag, unsigned int *dir, unsigned int *dst_leg) {
