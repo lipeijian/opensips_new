@@ -256,6 +256,8 @@ int moduleFunc(struct sip_msg *m, char *func,
 		return -1;
 	}
 
+	/* initialize all the act fields */
+	memset(&act, 0, sizeof(act));
 	elems[0].type = CMD_ST;
 	elems[0].u.data = exp_func_struct;
 	elems[1].type = STRING_ST;
@@ -974,11 +976,16 @@ moduleFunction (self, func, string1 = NULL, string2 = NULL)
 	LM_DBG("Calling exported func '%s', Param1 is '%s',"
 		" Param2 is '%s'\n", func, string1, string2);
 
-	ret = moduleFunc(msg, func, string1, string2, &retval);
-	if (ret < 0) {
-		LM_ERR("calling module function '%s' failed."
-			" Missing loadmodule?\n", func);
+	if (!msg) {
+		LM_ERR("invalid message received!\n");
 		retval = -1;
+	} else {
+		ret = moduleFunc(msg, func, string1, string2, &retval);
+		if (ret < 0) {
+			LM_ERR("calling module function '%s' failed."
+				" Missing loadmodule?\n", func);
+			retval = -1;
+		}
 	}
 	RETVAL = retval;
   OUTPUT:

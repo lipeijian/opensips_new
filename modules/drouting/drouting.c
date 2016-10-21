@@ -1473,7 +1473,7 @@ static int dr_init(void)
 			goto skip;
 		}
 
-		head_db_end->db_con = pkg_malloc(sizeof(db_con_t **));
+		head_db_end->db_con = pkg_malloc(sizeof(db_con_t *));
 		(*(head_db_end->db_con)) = 0;
 
 		/* bind to the SQL module */
@@ -3956,6 +3956,8 @@ static int strip_username(struct sip_msg* msg, int strip)
 {
 	struct action act;
 
+	/* initialize all the act fields */
+	memset(&act, 0, sizeof(act));
 	act.type = STRIP_T;
 	act.elem[0].type = NUMBER_ST;
 	act.elem[0].u.number = strip;
@@ -3973,6 +3975,8 @@ static int prefix_username(struct sip_msg* msg, str *pri)
 {
 	struct action act;
 
+	/* initialize all the act fields */
+	memset(&act, 0, sizeof(act));
 	act.type = PREFIX_T;
 	act.elem[0].type = STR_ST;
 	act.elem[0].u.s = *pri;
@@ -4174,7 +4178,6 @@ static int _is_dr_gw_w_part(struct sip_msg* msg, char * part, char* flags_pv,
 end:
 				return 1;
 			}
-			pgwa = pgwa->next;
 		}
 	}
 
