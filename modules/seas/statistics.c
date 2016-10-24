@@ -252,6 +252,7 @@ int start_stats_server(char *stats_socket)
       LM_ERR("setsockopt (%s)\n",strerror(errno));
       goto error;
    }
+   memset(&su, 0, sizeof(su));
    su.sin_family = he->h_addrtype;
    su.sin_port=htons(stats_port);
    memcpy(&su.sin_addr,he->h_addr_list[0],4);
@@ -367,7 +368,7 @@ int print_stats_info(int f,int sock)
    if(0>(k=snprintf(buf,STATS_BUF_SIZE, "Timings:      0-1   1-2   2-3   3-4   4-5   5-6   6-7   7-8   8-9   9-10  10-11 11-12 12-13 13-14 14+\n"))){
       goto error;
    }else{
-      if(k>STATS_BUF_SIZE){
+      if(k>=STATS_BUF_SIZE){
 	 j=STATS_BUF_SIZE;
 	 goto send;
       }
@@ -380,7 +381,7 @@ int print_stats_info(int f,int sock)
 	       seas_stats_table->dispatch[10],seas_stats_table->dispatch[11],seas_stats_table->dispatch[12],seas_stats_table->dispatch[13],seas_stats_table->dispatch[14]))){
       goto error;
    }else{
-      if(k>(STATS_BUF_SIZE-j)){
+      if(k>=(STATS_BUF_SIZE-j)){
 	 j=STATS_BUF_SIZE;
 	 goto send;
       }
@@ -392,7 +393,7 @@ int print_stats_info(int f,int sock)
 	       seas_stats_table->event[10],seas_stats_table->event[11],seas_stats_table->event[12],seas_stats_table->event[13],seas_stats_table->event[14]))){
       goto error;
    }else{
-      if(k>STATS_BUF_SIZE-j){
+      if(k>=STATS_BUF_SIZE-j){
 	 j=STATS_BUF_SIZE;
 	 goto send;
       }
@@ -402,7 +403,7 @@ int print_stats_info(int f,int sock)
 	       seas_stats_table->started_transactions,seas_stats_table->finished_transactions,seas_stats_table->received_replies,seas_stats_table->received))){
       goto error;
    }else{
-      if(k>STATS_BUF_SIZE-j){
+      if(k>=STATS_BUF_SIZE-j){
 	 j=STATS_BUF_SIZE;
 	 goto send;
       }

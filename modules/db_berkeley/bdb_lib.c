@@ -357,7 +357,7 @@ database_p bdblib_get_db(str *_s)
 {
 	int rc;
 	database_p _db_p=NULL;
-	char name[512];
+	char name[512 + 1 /* null terminated */];
 
 	if(!_s || !_s->s || _s->len<=0 || _s->len > 512)
 		return NULL;
@@ -715,7 +715,7 @@ int bdblib_create_journal(table_p _tp)
 {
 	char *s;
 	char fn[1024];
-	char d[64];
+	char d[128];
 	FILE *fp = NULL;
 	struct tm *t;
 	int bl;
