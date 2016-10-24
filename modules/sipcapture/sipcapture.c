@@ -1535,7 +1535,7 @@ static int get_hep_chunk(struct hepv3* h3, unsigned int chunk_id,
 		if (h3->hg.proto_t.chunk.length == 0)
 			goto chunk_not_set;
 
-		if (h3->hg.proto_t.data < 0 || h3->hg.proto_t.data >
+		if (h3->hg.proto_t.data >
 				(sizeof(hep_app_protos)/sizeof(str))-1) {
 			LM_DBG("Not a HEP default defined proto %d\n",
 					h3->hg.ip_proto.data);
@@ -3094,7 +3094,7 @@ static int w_sip_capture(struct sip_msg *msg, char *table_name,
 
 		sco.ruri = msg->first_line.u.request.uri;
 		sco.ruri_user = msg->parsed_uri.user;
-		sco.ruri_user = msg->parsed_uri.host;
+		sco.ruri_domain = msg->parsed_uri.host;
 	}
 	else if(msg->first_line.type == SIP_REPLY) {
 		sco.method = msg->first_line.u.reply.status;
@@ -3421,21 +3421,26 @@ static int w_sip_capture(struct sip_msg *msg, char *table_name,
 	sco.correlation_id.len = 0;
 
 	/* MSG */
-	if (h && h->version == 3) {
-		for (it=h->u.hepv3.chunk_list; it; it=it->next) {
-			if (it->chunk.type_id == HEP_CORRELATION_ID) {
-				sco.correlation_id.s = it->data;
-				sco.correlation_id.len = it->chunk.length - sizeof(hep_chunk_t);
+	if (h) {
+		if (h->version == 3) {
+			for (it=h->u.hepv3.chunk_list; it; it=it->next) {
+				if (it->chunk.type_id == HEP_CORRELATION_ID) {
+					sco.correlation_id.s = it->data;
+					sco.correlation_id.len = it->chunk.length - sizeof(hep_chunk_t);
 
-				break;
+					break;
+				}
 			}
-		}
 
-		sco.msg.s = h->u.hepv3.payload_chunk.data;
-		sco.msg.len = h->u.hepv3.payload_chunk.chunk.length - sizeof(hep_chunk_t);
+			sco.msg.s = h->u.hepv3.payload_chunk.data;
+			sco.msg.len = h->u.hepv3.payload_chunk.chunk.length - sizeof(hep_chunk_t);
+		} else {
+			sco.msg.s = h->u.hepv12.payload;
+			sco.msg.len = strlen(h->u.hepv12.payload);
+		}
 	} else {
-		sco.msg.s = h->u.hepv12.payload;
-		sco.msg.len = strlen(h->u.hepv12.payload);
+		sco.msg.s = msg->buf;
+		sco.msg.len = msg->len;
 	}
 	//EMPTY_STR(sco.msg);
 
@@ -4322,8 +4327,9 @@ static void hepv3_to_buf(struct hepv3* h3, char* buf, int *len)
 		if (h3->hg.ip_family.data != AF_INET && h3->hg.ip_family.data != AF_INET6) {
 			LM_ERR("Unknown family <%d>! Will use IPv4\n", h3->hg.ip_family.data);
 			af = AF_INET;
+		} else {
+			af = h3->hg.ip_family.data;
 		}
-		af = h3->hg.ip_family.data;
 	}
 
 
