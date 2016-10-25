@@ -45,6 +45,9 @@
 #include "mi_parser.h"
 #include "mi_writer.h"
 
+#include "../../mi/mi_trace.h"
+#define FIFO_REPLY_MAX_SIZE 512
+
 static char *mi_buf = 0;
 static char *reply_fifo_s = 0;
 static int  reply_fifo_len = 0;
@@ -54,6 +57,10 @@ static int mi_fifo_uid;
 static int mi_fifo_gid;
 
 static int volatile mi_reload_fifo = 0;
+
+char reply_buf[FIFO_REPLY_MAX_SIZE];
+extern trace_dest trace_dst;
+
 
 FILE* mi_create_fifo(void)
 {
@@ -489,6 +496,8 @@ void mi_fifo_server(FILE *fifo_stream)
 	struct mi_cmd *f;
 	FILE *reply_stream;
 
+	str command_s;
+
 	while(1) {
 		reply_stream = NULL;
 
@@ -520,6 +529,7 @@ void mi_fifo_server(FILE *fifo_stream)
 			goto consume1;
 		}
 		command = mi_buf+1;
+
 		file_sep=strchr(command, MI_CMD_SEPARATOR );
 		if (file_sep==NULL) {
 			LM_ERR("file separator missing\n");
@@ -541,6 +551,16 @@ void mi_fifo_server(FILE *fifo_stream)
 		}
 		/* make command zero-terminated */
 		*file_sep=0;
+		/* FIXME trace mi command here */
+		if (trace_dst) {
+				command_s.s = command;
+				command_s.len = file_sep - command;
+				if (trace_mi_message(NULL, NULL, &command_s, trace_dst) < 0) {
+					/* don't quit; only tracing failed; let the command execute */
+					LM_ERR("Failed to trace mi request!\n");
+				}
+		}
+
 
 		f=lookup_mi_cmd( command, strlen(command) );
 		if (f==0) {
@@ -622,4 +642,39 @@ consume2:
 consume1:
 		mi_do_consume();
 	}
+}
+
+inline int trace_is_on(void)
+{
+	return trace_dst ? 1 : 0;
+}
+
+/*
+ * WARNINING: THIS FUNCTION MUST BE USED ONLY AFTER
+ * trace_is_on() was checked, else might cause a segfault
+ * if trace not enabled and no trace destination is defined
+ *
+ */
+int trace_fifo_reply(char* reply_fmt, va_list arg)
+{
+	int len;
+	str repl_s;
+
+	len=vsnprintf(reply_buf, FIFO_REPLY_MAX_SIZE, reply_fmt, arg);
+	if (len < 0 || len == FIFO_REPLY_MAX_SIZE) {
+		LM_ERR("failed to write mi command to buffer! probably this"
+				" is due to reply bigger than %d!\n",
+				FIFO_REPLY_MAX_SIZE);
+		return -1;
+	}
+
+	repl_s.s = reply_buf;
+	repl_s.len = len;
+
+	if (trace_mi_message(NULL, NULL, &repl_s, trace_dst) < 0) {
+		LM_ERR("failed to trace mi reply!\n");
+		return -1;
+	}
+
+	return 0;
 }

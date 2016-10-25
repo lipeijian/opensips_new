@@ -39,23 +39,35 @@
 #define FIFO_REPLY_WAIT     80000
 
 
-
 FILE* mi_init_fifo_server(char *fifo_name, int mode, int uid, int gid,
 		char* fifo_reply_dir);
 
 void  mi_fifo_server(FILE *fifostream);
 
 int   mi_read_line( char *b, int max, FILE **stream, int *read);
+int trace_fifo_reply(char* reply_fmt, va_list arg);
+inline int trace_is_on(void);
 
 static inline int mi_fifo_reply( FILE *stream, char *reply_fmt, ... )
 {
+	/* FIXME trace fifo reply here */
 	int r;
 	va_list ap;
 
 retry:
+	if (trace_is_on()) {
+		va_start(ap, reply_fmt);
+		if (trace_fifo_reply(reply_fmt, ap) < 0) {
+			/* don't exit; only tracing failed; rest still works fine */
+			LM_ERR("failed to trace mi message!\n");
+		}
+		va_end(ap);
+	}
+
 	va_start(ap, reply_fmt);
 	r = vfprintf( stream, reply_fmt, ap);
 	va_end(ap);
+
 	if (r<=0) {
 		if ((errno==EINTR)||(errno==EAGAIN)||(errno==EWOULDBLOCK)) {
 			goto retry;

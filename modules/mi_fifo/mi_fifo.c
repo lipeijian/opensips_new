@@ -44,6 +44,10 @@
 #include "mi_writer.h"
 #include "fifo_fnc.h"
 
+#include "../../mi/mi_trace.h"
+//#include "../modules/proto_hep/hep.h"
+
+
 static int mi_mod_init(void);
 static int mi_child_init(int rank);
 static void fifo_process(int rank);
@@ -62,6 +66,10 @@ static char *mi_fifo_gid_s = 0;
 static int  mi_fifo_mode = S_IRUSR| S_IWUSR| S_IRGRP| S_IWGRP; /* rw-rw---- */
 static int  read_buf_size = MAX_MI_FIFO_READ;
 
+/* tracing params */
+static char* trace_dest_name=NULL;
+trace_dest trace_dst=NULL;
+
 
 
 static param_export_t mi_params[] = {
@@ -73,6 +81,7 @@ static param_export_t mi_params[] = {
 	{"fifo_user",        INT_PARAM, &mi_fifo_uid},
 	{"reply_dir",        STR_PARAM, &mi_fifo_reply_dir},
 	{"reply_indent",     STR_PARAM, &mi_reply_indent},
+	{"trace_destination",STR_PARAM,  &trace_dest_name},
 	{0,0,0}
 };
 
@@ -108,6 +117,7 @@ static int mi_mod_init(void)
 {
 	int n;
 	struct stat filestat;
+	str trace_name_s;
 
 	/* checking the mi_fifo module param */
 	if (mi_fifo==NULL || *mi_fifo == 0) {
@@ -164,6 +174,13 @@ static int mi_mod_init(void)
 			LM_ERR("bad group name %s\n", mi_fifo_gid_s);
 			return -1;
 		}
+	}
+
+	if (trace_dest_name) {
+		trace_name_s.s = trace_dest_name;
+		trace_name_s.len = strlen(trace_name_s.s);
+		if (trace_api && trace_api->get_trace_dest_by_name)
+			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
 	}
 
 	return 0;
