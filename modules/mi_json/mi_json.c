@@ -41,12 +41,16 @@ int mi_json_answer_to_connection (void *cls, void *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
 		size_t *upload_data_size, void **con_cls,
-		str *buffer, str *page, trace_dest* dest);
+		str *buffer, str *page, trace_dest* dest_p);
 static ssize_t mi_json_flush_data(void *cls, uint64_t pos, char *buf,
 		size_t max);
 
 str http_root = str_init("json");
 httpd_api_t httpd_api;
+
+/* tracing params */
+static char* trace_dest_name=NULL;
+trace_dest trace_dst=NULL;
 
 
 static const str MI_HTTP_U_ERROR = str_init("Internal server error");
@@ -63,6 +67,7 @@ static const char* MI_JSON_COMMAND_ERROR_S = "{\"error\": {\"code\": %u, \"messa
 /* module parameters */
 static param_export_t mi_params[] = {
 	{"mi_json_root", STR_PARAM, &http_root.s},
+	{"trace_destination", STR_PARAM,  &trace_dest_name},
 	{0,0,0}
 };
 
@@ -108,6 +113,8 @@ void proc_init(void)
 
 static int mod_init(void)
 {
+	str trace_name_s;
+
 	http_root.len = strlen(http_root.s);
 
 	/* Load httpd api */
@@ -115,6 +122,15 @@ static int mod_init(void)
 		LM_ERR("Failed to load httpd api\n");
 		return -1;
 	}
+
+	/* check if tracing is enabled */
+	if (trace_dest_name) {
+		trace_name_s.s = trace_dest_name;
+		trace_name_s.len = strlen(trace_name_s.s);
+		if (trace_api && trace_api->get_trace_dest_by_name)
+			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
+	}
+
 	/* Load httpd hooks */
 	httpd_api.register_httpdcb(exports.name, &http_root,
 				&mi_json_answer_to_connection,
@@ -243,7 +259,7 @@ int mi_json_answer_to_connection (void *cls, void *connection,
 	const char *url, const char *method,
 	const char *version, const char *upload_data,
 	size_t *upload_data_size, void **con_cls,
-	str *buffer, str *page, trace_dest* dest)
+	str *buffer, str *page, trace_dest* dest_p)
 {
 	str command = {NULL, 0};
 	str params = {NULL, 0};
@@ -329,6 +345,16 @@ int mi_json_answer_to_connection (void *cls, void *connection,
 					MI_HTTP_U_METHOD.len, MI_HTTP_U_METHOD.s);
 
 	}
+
+	if (trace_dst) {
+		if (dest_p == NULL) {
+			LM_ERR("bad call!\n");
+		} else {
+			*dest_p = trace_dst;
+		}
+	}
+
+
 
 	return ret_code;
 }
