@@ -41,13 +41,18 @@ int mi_http_answer_to_connection (void *cls, void *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
 		size_t *upload_data_size, void **con_cls,
-		str *buffer, str *page, trace_dest* dest);
+		str *buffer, str *page, trace_dest* dest_p);
 static ssize_t mi_http_flush_data(void *cls, uint64_t pos, char *buf, size_t max);
 
 str http_root = str_init("mi");
 int http_method = 0;
 
 httpd_api_t httpd_api;
+
+
+/* tracing params */
+static char* trace_dest_name=NULL;
+trace_dest trace_dst=NULL;
 
 
 static const str MI_HTTP_U_ERROR = str_init("<html><body>"
@@ -60,8 +65,9 @@ static const str MI_HTTP_U_METHOD = str_init("<html><body>"
 
 /* module parameters */
 static param_export_t mi_params[] = {
-	{"mi_http_root",   STR_PARAM, &http_root.s},
-	{"mi_http_method", INT_PARAM, &http_method},
+	{"mi_http_root",      STR_PARAM,  &http_root.s},
+	{"mi_http_method",    INT_PARAM,  &http_method},
+	{"trace_destination", STR_PARAM,  &trace_dest_name},
 	{0,0,0}
 };
 
@@ -111,6 +117,8 @@ void proc_init(void)
 
 static int mod_init(void)
 {
+	str trace_name_s;
+
 	http_root.len = strlen(http_root.s);
 
 	if (http_method<0 || http_method>1) {
@@ -122,6 +130,15 @@ static int mod_init(void)
 		LM_ERR("Failed to load httpd api\n");
 		return -1;
 	}
+
+	/* check if tracing is enabled */
+	if (trace_dest_name) {
+		trace_name_s.s = trace_dest_name;
+		trace_name_s.len = strlen(trace_name_s.s);
+		if (trace_api && trace_api->get_trace_dest_by_name)
+			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
+	}
+
 	/* Load httpd hooks */
 	httpd_api.register_httpdcb(exports.name, &http_root,
 				&mi_http_answer_to_connection,
@@ -252,7 +269,7 @@ int mi_http_answer_to_connection (void *cls, void *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
 		size_t *upload_data_size, void **con_cls,
-		str *buffer, str *page, trace_dest* dest)
+		str *buffer, str *page, trace_dest* dest_p)
 {
 	int mod = -1;
 	int cmd = -1;
@@ -319,6 +336,14 @@ int mi_http_answer_to_connection (void *cls, void *connection,
 		LM_ERR("unexpected method [%s]\n", method);
 		*page = MI_HTTP_U_METHOD;
 		ret_code = MI_HTTP_INTERNAL_ERROR;
+	}
+
+	if (trace_dst) {
+		if (dest_p == NULL) {
+			LM_ERR("bad call!\n");
+		} else {
+			*dest_p = trace_dst;
+		}
 	}
 
 	return ret_code;
