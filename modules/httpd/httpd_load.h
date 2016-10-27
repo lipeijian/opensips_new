@@ -29,6 +29,8 @@
 
 #define HTTPD_UNKNOWN_CONTENT_LEN	-1
 
+#include "../../mi/mi_trace.h"
+
 enum HTTPD_CONTENT_TYPE {
 	HTTPD_UNKNOWN_CNT_TYPE = -1,
 	HTTPD_STD_CNT_TYPE = 0,
@@ -62,13 +64,16 @@ enum HTTPD_CONTENT_TYPE {
  * @param page the page to return.  If no page is returned,
  *             then the page will be built later on via a
  *             callback (see httpd_flush_data_cb)
+ * @param dest trace destination. if is set to something different
+ *        than NULL the httpd request and respond will be traced
+ *        to that destination
  * @returns code the HTTP code to be returned to the client
  */
 typedef int (httpd_acces_handler_cb) (void *cls, void *connection, const char *url,
 				const char *method, const char *version,
 				const char *upload_data, size_t *upload_data_size,
 				void **con_cls,
-				str *buffer, str *page);
+				str *buffer, str *page, trace_dest* dest);
 
 /**
  * Callback used by httpd in order to obtain content.  The

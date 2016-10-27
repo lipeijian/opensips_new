@@ -48,6 +48,8 @@
 #include "../../sliblist.h"
 #include "httpd_load.h"
 
+/* should be more than enough */
+#define REQ_BUF_SIZE 2048
 
 extern int port;
 extern str ip;
@@ -55,10 +57,18 @@ extern str buffer;
 extern int post_buf_size;
 extern struct httpd_cb *httpd_cb_list;
 
+/* if tracing is activated we'll store the request here */
+static char req_buf[REQ_BUF_SIZE];
+
+
 static const str MI_HTTP_U_URL = str_init("<html><body>"
 "Unable to parse URL!</body></html>");
 static const str MI_HTTP_U_METHOD = str_init("<html><body>"
 "Unsupported HTTP request!</body></html>");
+
+extern union sockaddr_union httpd_server_info;
+static inline int trace_httpd_message(union sockaddr_union* src, union sockaddr_union* dst,
+		str* body, trace_dest trace_dst);
 
 /**
  * Data structure to store inside elents of slinkedl_list list.
@@ -387,6 +397,51 @@ void httpd_lookup_arg(void *connection, const char *key,
 	return;
 }
 
+int reqHdrs_Iterator(void *cls, enum MHD_ValueKind kind, const char *key, const char *value)
+{
+	int bytes;
+	str* http_req = cls;
+
+
+	bytes = snprintf(http_req->s + http_req->len, REQ_BUF_SIZE - http_req->len,
+			"%s: %s\r\n", key, value);
+
+	http_req->len += bytes;
+
+	/* if no space in the buffer stop iterating through headers */
+	if (bytes <= 0) {
+		LM_ERR("buffer too small! failed to create http request!\n");
+		return MHD_NO;
+	}
+
+	return MHD_YES;
+}
+
+/*
+ * WARNING as the httpd documentation states this function shall only be
+ * called from answer_to_connection(MHD_AccessHandlerCallback) otherwise,
+ * access maybe improperly synchronized
+ *
+ */
+static int get_request_buffer(struct MHD_Connection *connection, const char *url,
+		const char *method, const char *version, str* request)
+{
+	str http_req = {req_buf, 0};
+
+	if (request == NULL) {
+		LM_ERR("bad usage!\n");
+		return -1;
+	}
+
+	http_req.len = snprintf(http_req.s, REQ_BUF_SIZE, "%s %s %s\r\n", method, url, version);
+
+	/* don't check retcode; it's the number of headers iterated through, we don't need that */
+	MHD_get_connection_values(connection, MHD_HEADER_KIND, reqHdrs_Iterator, &http_req);
+
+	*request = http_req;
+
+	return 0;
+}
 
 int answer_to_connection (void *cls, struct MHD_Connection *connection,
 		const char *url, const char *method,
@@ -405,6 +460,10 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 	int cnt_type = HTTPD_STD_CNT_TYPE;
 	int accept_type = HTTPD_STD_CNT_TYPE;
 	int ret_code = MHD_HTTP_OK;
+
+	str http_request;
+	union sockaddr_union* cl_socket;
+	trace_dest t_dst=NULL;
 
 	LM_DBG("START *** cls=%p, connection=%p, url=%s, method=%s, "
 			"versio=%s, upload_data[%zu]=%p, *con_cls=%p\n",
@@ -503,7 +562,7 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 								normalised_url,
 								method, version,
 								upload_data, upload_data_size, con_cls,
-								&buffer, &page);
+								&buffer, &page, &t_dst);
 					} else {
 						page = MI_HTTP_U_URL;
 						ret_code = MHD_HTTP_BAD_REQUEST;
@@ -589,7 +648,7 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 						normalised_url,
 						method, version,
 						upload_data, upload_data_size, con_cls,
-						&buffer, &page);
+						&buffer, &page, &t_dst);
 			} else {
 				page = MI_HTTP_U_URL;
 				ret_code = MHD_HTTP_BAD_REQUEST;
@@ -613,7 +672,7 @@ int answer_to_connection (void *cls, struct MHD_Connection *connection,
 					normalised_url,
 					method, version,
 					upload_data, upload_data_size, con_cls,
-					&buffer, &page);
+					&buffer, &page, &t_dst);
 		} else {
 			page = MI_HTTP_U_URL;
 			ret_code = MHD_HTTP_BAD_REQUEST;
@@ -649,6 +708,27 @@ send_response:
 							(void*)async_data,
 							NULL);
 	}
+
+	/* trace response and request
+	 * FIXME is the len in 'page' str good if MHD_create_response_from_callback
+	 * is used? (it looks like not). how shall we get the buffer
+	 * */
+	if (t_dst) {
+		/* FIXME get this only if trace is on */
+		cl_socket = *(union sockaddr_union**)MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
+		get_request_buffer(connection, url, method, version, &http_request);
+
+		if (trace_httpd_message(cl_socket, NULL, &http_request, t_dst) < 0) {
+			LM_ERR("failed to trace http request!\n");
+			return -1;
+		}
+
+		if (trace_httpd_message(NULL, cl_socket, &page, t_dst) < 0) {
+			LM_ERR("failed to trace http reply!\n");
+			return -1;
+		}
+	}
+
 	if (cnt_type==HTTPD_TEXT_XML_CNT_TYPE || accept_type==HTTPD_TEXT_XML_CNT_TYPE)
 		MHD_add_response_header(response,
 								MHD_HTTP_HEADER_CONTENT_TYPE,
@@ -764,4 +844,23 @@ void httpd_proc_destroy(void)
 	MHD_stop_daemon (dmn);
 #endif
 	return;
+}
+
+
+/*
+ * trace httpd message function(the module is not related only to mi requests
+ * trace_mi_message name might be confusing
+ *
+ */
+static inline int trace_httpd_message(union sockaddr_union* src, union sockaddr_union* dst,
+		str* body, trace_dest trace_dst)
+{
+	/* one of them must be null; this will be the server for whom we already know
+	 * listening socket information */
+	if ((src && dst) || !(src || dst)) {
+		LM_ERR("bad usage! one of the source and destination must be null!\n");
+		return -1;
+	}
+
+	return trace_mi_message(src?src:&httpd_server_info, dst?dst:&httpd_server_info, body, trace_dst);
 }
