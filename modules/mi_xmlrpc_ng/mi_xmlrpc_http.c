@@ -41,12 +41,16 @@ int mi_xmlrpc_http_answer_to_connection (void *cls, void *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
 		size_t *upload_data_size, void **con_cls,
-		str *buffer, str *page, trace_dest* dest);
+		str *buffer, str *page, trace_dest* dest_p);
 static ssize_t mi_xmlrpc_http_flush_data(void *cls, uint64_t pos, char *buf, size_t max);
 
 str http_root = str_init("RPC2");
 int version = 2;
 httpd_api_t httpd_api;
+
+/* tracing params */
+static char* trace_dest_name=NULL;
+trace_dest trace_dst=NULL;
 
 #define MI_XMLRPC_NOT_ACCEPTABLE_STR	"406"
 #define MI_XMLRPC_INTERNAL_ERROR_STR	"500"
@@ -73,6 +77,7 @@ static char err_buf[MI_XML_ERROR_BUF_MAX_LEN];
 static param_export_t mi_params[] = {
 	{"http_root",        STR_PARAM, &http_root.s},
 	{"format_version",   INT_PARAM, &version},
+	{"trace_destination", STR_PARAM,  &trace_dest_name},
 	{0,0,0}
 };
 
@@ -118,6 +123,7 @@ void proc_init(void)
 
 static int mod_init(void)
 {
+	str trace_name_s;
 	http_root.len = strlen(http_root.s);
 
 	/* Load httpd api */
@@ -125,6 +131,15 @@ static int mod_init(void)
 		LM_ERR("Failed to load httpd api\n");
 		return -1;
 	}
+
+	/* check if tracing is enabled */
+	if (trace_dest_name) {
+		trace_name_s.s = trace_dest_name;
+		trace_name_s.len = strlen(trace_name_s.s);
+		if (trace_api && trace_api->get_trace_dest_by_name)
+			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
+	}
+
 	/* Load httpd hooks */
 	httpd_api.register_httpdcb(exports.name, &http_root,
 				&mi_xmlrpc_http_answer_to_connection,
@@ -256,7 +271,7 @@ int mi_xmlrpc_http_answer_to_connection (void *cls, void *connection,
 		const char *url, const char *method,
 		const char *version, const char *upload_data,
 		size_t *upload_data_size, void **con_cls,
-		str *buffer, str *page, trace_dest* dest)
+		str *buffer, str *page, trace_dest* dest_p)
 {
 	str arg = {NULL, 0};
 	struct mi_root *tree = NULL;
@@ -308,6 +323,14 @@ int mi_xmlrpc_http_answer_to_connection (void *cls, void *connection,
 	} else {
 		LM_ERR("unexpected method [%s]\n", method);
 		*page = MI_XMLRPC_U_METHOD;
+	}
+
+	if (trace_dst) {
+		if (dest_p == NULL) {
+			LM_ERR("bad call!\n");
+		} else {
+			*dest_p = trace_dst;
+		}
 	}
 
 	return ret_code;
