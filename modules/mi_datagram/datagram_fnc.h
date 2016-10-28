@@ -34,6 +34,7 @@
 #include "../../dprint.h"
 #include "../../ut.h"
 #include "../../mi/mi.h"
+#include "../../mi/mi_trace.h"
 #include "../../mem/mem.h"
 #include "../../mem/shm_mem.h"
 

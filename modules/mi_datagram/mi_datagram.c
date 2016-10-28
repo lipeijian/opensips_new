@@ -55,6 +55,7 @@
 #include "mi_datagram_writer.h"
 
 
+
 /* AF_LOCAL is not defined on solaris */
 
 #if !defined(AF_LOCAL)
@@ -77,7 +78,7 @@ static void datagram_process(int rank);
 
 /* local variables */
 static int mi_socket_domain =  AF_LOCAL;
-static sockaddr_dtgram mi_dtgram_addr;
+sockaddr_dtgram mi_dtgram_addr;
 
 /* socket definition parameter */
 static char *mi_socket = 0;
@@ -94,9 +95,9 @@ static int mi_unix_socket_mode = S_IRUSR| S_IWUSR| S_IRGRP| S_IWGRP;
 /* mi specific parameters */
 static char *mi_reply_indent = DEFAULT_MI_REPLY_IDENT;
 
-
-
-
+/* tracing params */
+static char* trace_dest_name=NULL;
+trace_dest trace_dst=NULL;
 
 
 static proc_export_t mi_procs[] = {
@@ -116,6 +117,7 @@ static param_export_t mi_params[] = {
 	{"unix_socket_user",    STR_PARAM,    &mi_unix_socket_uid_s     },
 	{"unix_socket_user",    INT_PARAM,    &mi_unix_socket_uid       },
 	{"reply_indent",        STR_PARAM,    &mi_reply_indent          },
+	{"trace_destination",   STR_PARAM,  &trace_dest_name},
 	{0,0,0}
 };
 
@@ -148,6 +150,7 @@ static int mi_mod_init(void)
 	struct hostent * host;
 	char *p, *host_s;
 	str port_str;
+	str trace_name_s;
 
 	/* checking the mi_socket module param */
 	LM_DBG("testing socket existence...\n");
@@ -253,6 +256,15 @@ static int mi_mod_init(void)
 		memcpy( mi_dtgram_addr.unix_addr.sun_path,
 			mi_socket, strlen(mi_socket));
 	}
+
+	if (trace_dest_name) {
+		trace_name_s.s = trace_dest_name;
+		trace_name_s.len = strlen(trace_name_s.s);
+		if (trace_api && trace_api->get_trace_dest_by_name)
+			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
+	}
+
+
 
 	return 0;
 }

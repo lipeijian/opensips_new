@@ -78,7 +78,8 @@ static unsigned int mi_socket_domain;
 
 static int mi_sock_check(int fd, char* fname);
 
-
+extern trace_dest trace_dst;
+extern sockaddr_dtgram mi_dtgram_addr;
 
 int  mi_init_datagram_server(sockaddr_dtgram *addr, unsigned int socket_domain,
 						rx_tx_sockets * socks, int mode, int uid, int gid )
@@ -416,6 +417,16 @@ static inline struct mi_handler* build_async_handler(unsigned int sock_domain,
 
 void mi_datagram_server(int rx_sock, int tx_sock)
 {
+
+	#define TRACE_MSG(from, to, m_s, m_len, d) \
+		do { \
+			str m = {m_s, m_len}; \
+			if (d && trace_mi_message((union sockaddr_union *)&from, \
+						(union sockaddr_union *)&to, &m, &d) < 0) { \
+				LM_ERR("failed to trace mi_datagram request!\n"); \
+			} \
+		} while(0);
+
 	struct mi_root *mi_cmd;
 	struct mi_root *mi_rpl;
 	struct mi_handler *hdl;
@@ -463,6 +474,9 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 		dtgram.len 		= ret;
 		dtgram.current 	= dtgram.start;
 
+		/* trace the request */
+		TRACE_MSG(reply_addr, mi_dtgram_addr, dtgram.start, dtgram.len, trace_dst);
+
 		ret = identify_command(&dtgram, &f);
 		/*analyze the command--from the first line*/
 		if(ret != 0)
@@ -472,6 +486,12 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 						  MI_COMMAND_AVAILABLE_LEN,
 						  (struct sockaddr* )&reply_addr, reply_addr_len,
 						  mi_socket_timeout);
+
+			/* trace reply */
+			TRACE_MSG(mi_dtgram_addr, reply_addr,
+					MI_COMMAND_NOT_AVAILABLE, MI_COMMAND_AVAILABLE_LEN,
+					trace_dst);
+
 			continue;
 		}
 		LM_DBG("we have a valid command \n");
@@ -485,6 +505,11 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 				mi_send_dgram(tx_sock, MI_INTERNAL_ERROR,
 						MI_INTERNAL_ERROR_LEN,(struct sockaddr* )&reply_addr,
 						reply_addr_len, mi_socket_timeout);
+
+				/* trace reply */
+				TRACE_MSG(mi_dtgram_addr, reply_addr,
+						MI_INTERNAL_ERROR, MI_INTERNAL_ERROR_LEN,
+						trace_dst);
 				continue;
 			}
 		} else{
@@ -507,6 +532,11 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 							  (struct sockaddr* )&reply_addr, reply_addr_len,
 							  mi_socket_timeout);
 				free_async_handler(hdl);
+
+				/* trace reply */
+				TRACE_MSG(mi_dtgram_addr, reply_addr,
+						MI_PARSE_ERROR, MI_PARSE_ERROR_LEN,
+						trace_dst);
 				continue;
 			}
 			mi_cmd->async_hdl = hdl;
@@ -520,6 +550,12 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 			mi_send_dgram(tx_sock, MI_COMMAND_FAILED, MI_COMMAND_FAILED_LEN,
 							(struct sockaddr* )&reply_addr, reply_addr_len,
 							mi_socket_timeout);
+
+
+			/* trace reply */
+			TRACE_MSG(mi_dtgram_addr, reply_addr,
+					MI_COMMAND_FAILED, MI_COMMAND_FAILED_LEN,
+					trace_dst);
 			goto failure;
 		}
 
@@ -543,6 +579,10 @@ void mi_datagram_server(int rx_sock, int tx_sock)
 				LM_ERR("failed to send the response: %s (%d)\n",
 					strerror(errno), errno);
 			}
+
+			/* trace reply */
+			TRACE_MSG(mi_dtgram_addr, reply_addr, dtgram.start, len, trace_dst);
+
 			free_mi_tree( mi_rpl );
 			free_async_handler(hdl);
 			if (mi_cmd) free_mi_tree( mi_cmd );
@@ -560,5 +600,7 @@ failure:
 		if (mi_rpl) free_mi_tree(mi_rpl);
 		continue;
 	}
+
+#undef TRACE_REPLY
 }
 
