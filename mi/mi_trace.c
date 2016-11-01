@@ -24,16 +24,15 @@
  *  2016-09-19  first version (Ionut Ionita)
  */
 #include "../ut.h"
-//#include "../modules/proto_hep/hep.h"
 
 #include "mi_trace.h"
 
 #define TRACE_API_MODULE "proto_hep"
-/* FIXME this index should be taken using a function or sth */
-#define HEP_PROTO_TYPE_MI   0x057
+#define MI_ID_S "mi"
 
 
 trace_proto_t* mi_trace_api=NULL;
+int mi_message_id;
 
 
 void try_load_trace_api(void)
@@ -45,7 +44,10 @@ void try_load_trace_api(void)
 	memset(mi_trace_api, 0, sizeof(trace_proto_t));
 	if (trace_prot_bind(TRACE_API_MODULE, mi_trace_api) < 0) {
 		LM_DBG("No tracing module used!\n");
+		return;
 	}
+
+	mi_message_id = mi_trace_api->get_message_id(MI_ID_S);
 }
 
 
@@ -83,7 +85,7 @@ int trace_mi_message(union sockaddr_union* src, union sockaddr_union* dst,
 		to_su = &tmp;
 
 	message = mi_trace_api->create_trace_message(from_su, to_su,
-			proto, body, HEP_PROTO_TYPE_MI, trace_dst);
+			proto, body, mi_message_id, trace_dst);
 	if (message == NULL) {
 		LM_ERR("failed to create trace message!\n");
 		return -1;

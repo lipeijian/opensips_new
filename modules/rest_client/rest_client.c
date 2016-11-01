@@ -61,6 +61,10 @@ static void mod_destroy(void);
 siptrace_api_t siptrace_api;
 /* id with which rest module will be identified by siptrace */
 trace_type_id_t rest_type_id;
+/* message identifier */
+int rest_message_id;
+
+
 /* rest module string identifier */
 static const char* rest_id_s = "rest";
 
@@ -223,6 +227,7 @@ static int mod_init(void)
 	if (load_siptrace_api(&siptrace_api) == 0) {
 		/* tracing module loaded */
 		rest_type_id = siptrace_api.register_type((char *)rest_id_s);
+		rest_message_id = siptrace_api.trace_api->get_message_id((char *)rest_id_s);
 	}
 
 	LM_INFO("Module initialized!\n");

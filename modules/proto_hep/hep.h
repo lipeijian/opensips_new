@@ -48,12 +48,6 @@
 
 #define HEP_OPENSIPS_VENDOR_ID 0x0003
 
-/* FIXME these numbers should be acquired by modules through a function */
-#define HEP_PROTO_TYPE_SIP 0x01
-#define HEP_PROTO_TYPE_REST 0x055
-#define HEP_PROTO_TYPE_XLOG 0x056
-#define HEP_PROTO_TYPE_MI   0x057
-
 enum hep_generic_chunks { HEP_PROTO_FAMILY=0x0001, HEP_PROTO_ID=0x0002,
 	HEP_IPV4_SRC=0x0003, HEP_IPV4_DST=0x0004, HEP_IPV6_SRC=0x0005,
 	HEP_IPV6_DST=0x0006, HEP_SRC_PORT=0x0007, HEP_DST_PORT=0x0008,

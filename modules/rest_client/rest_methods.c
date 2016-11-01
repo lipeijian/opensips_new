@@ -43,6 +43,7 @@ static rest_trace_param_t trace_param;
 
 extern siptrace_api_t siptrace_api;
 extern trace_type_id_t rest_type_id;
+extern int rest_message_id;
 
 
 static inline int extract_host(str* url, char** host, unsigned int* port);
@@ -1003,7 +1004,7 @@ static int trace_rest_message(str* host, str* dest, str* body, str* correlation_
 
 	while((send_dest=siptrace_api.get_next_destination(old_dest, siptrace_id_hash))) {
 		trace_msg = siptrace_api.trace_api->create_trace_message(&from_su, &to_su,
-				proto, body, HEP_PROTO_TYPE_REST, send_dest);
+				proto, body, rest_message_id, send_dest);
 		if (trace_msg == NULL) {
 			LM_ERR("failed to create trace message!\n");
 			return -1;
