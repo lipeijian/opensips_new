@@ -260,8 +260,8 @@ static int mi_mod_init(void)
 	if (trace_dest_name) {
 		trace_name_s.s = trace_dest_name;
 		trace_name_s.len = strlen(trace_name_s.s);
-		if (trace_api && trace_api->get_trace_dest_by_name)
-			trace_dst = trace_api->get_trace_dest_by_name(&trace_name_s);
+		if (mi_trace_api && mi_trace_api->get_trace_dest_by_name)
+			trace_dst = mi_trace_api->get_trace_dest_by_name(&trace_name_s);
 	}
 
 

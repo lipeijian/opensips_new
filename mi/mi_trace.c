@@ -33,17 +33,17 @@
 #define HEP_PROTO_TYPE_MI   0x057
 
 
-trace_proto_t* trace_api=NULL;
+trace_proto_t* mi_trace_api=NULL;
 
 
 void try_load_trace_api(void)
 {
-	trace_api = pkg_malloc(sizeof(trace_proto_t));
-	if (trace_api == NULL)
+	mi_trace_api = pkg_malloc(sizeof(trace_proto_t));
+	if (mi_trace_api == NULL)
 		return;
 
-	memset(trace_api, 0, sizeof(trace_proto_t));
-	if (trace_prot_bind(TRACE_API_MODULE, trace_api) < 0) {
+	memset(mi_trace_api, 0, sizeof(trace_proto_t));
+	if (trace_prot_bind(TRACE_API_MODULE, mi_trace_api) < 0) {
 		LM_DBG("No tracing module used!\n");
 	}
 }
@@ -58,8 +58,8 @@ int trace_mi_message(union sockaddr_union* src, union sockaddr_union* dst,
 
 	trace_message message;
 
-	if (trace_api->create_trace_message == NULL ||
-			trace_api->send_message == NULL) {
+	if (mi_trace_api->create_trace_message == NULL ||
+			mi_trace_api->send_message == NULL) {
 		LM_DBG("trace api not loaded!\n");
 		return 0;
 	}
@@ -82,19 +82,19 @@ int trace_mi_message(union sockaddr_union* src, union sockaddr_union* dst,
 	else
 		to_su = &tmp;
 
-	message = trace_api->create_trace_message(from_su, to_su,
+	message = mi_trace_api->create_trace_message(from_su, to_su,
 			proto, body, HEP_PROTO_TYPE_MI, trace_dst);
 	if (message == NULL) {
 		LM_ERR("failed to create trace message!\n");
 		return -1;
 	}
 
-	if (trace_api->send_message(message, trace_dst, NULL) < 0) {
+	if (mi_trace_api->send_message(message, trace_dst, NULL) < 0) {
 		LM_ERR("failed to send trace message!\n");
 		return -1;
 	}
 
-	trace_api->free_message(message);
+	mi_trace_api->free_message(message);
 
 	return 0;
 }

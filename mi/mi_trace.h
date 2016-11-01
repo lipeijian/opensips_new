@@ -28,7 +28,7 @@
 
 #include "../trace_api.h"
 
-extern trace_proto_t* trace_api;
+extern trace_proto_t* mi_trace_api;
 
 void try_load_trace_api(void);
 int trace_mi_message(union sockaddr_union* src, union sockaddr_union* dst,
