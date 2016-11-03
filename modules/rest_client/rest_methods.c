@@ -42,8 +42,7 @@ static char repl_buf[TRACE_BUF_MAX_SIZE];
 static rest_trace_param_t trace_param;
 
 extern siptrace_api_t siptrace_api;
-extern trace_type_id_t rest_type_id;
-extern int rest_message_id;
+extern trace_proto_id_t rest_proto_id;
 
 
 static inline int extract_host(str* url, char** host, unsigned int* port);
@@ -926,7 +925,7 @@ static inline int trace_enabled(void)
 		return 0;
 	}
 
-	if (siptrace_api.is_id_traced(rest_type_id) == 0) {
+	if (siptrace_api.is_id_traced(rest_proto_id) == 0) {
 		LM_DBG("Rest module not traced! aborting trace...\n");
 		return 0;
 	}
@@ -953,7 +952,7 @@ static int trace_rest_message(str* host, str* dest, str* body, str* correlation_
 		return 0;
 	}
 
-	if ((siptrace_id_hash=siptrace_api.is_id_traced(rest_type_id)) == 0) {
+	if ((siptrace_id_hash=siptrace_api.is_id_traced(rest_proto_id)) == 0) {
 		LM_DBG("Rest module not traced! aborting trace...\n");
 		return 0;
 	}
@@ -1004,7 +1003,7 @@ static int trace_rest_message(str* host, str* dest, str* body, str* correlation_
 
 	while((send_dest=siptrace_api.get_next_destination(old_dest, siptrace_id_hash))) {
 		trace_msg = siptrace_api.trace_api->create_trace_message(&from_su, &to_su,
-				proto, body, rest_message_id, send_dest);
+				proto, body, rest_proto_id, send_dest);
 		if (trace_msg == NULL) {
 			LM_ERR("failed to create trace message!\n");
 			return -1;
