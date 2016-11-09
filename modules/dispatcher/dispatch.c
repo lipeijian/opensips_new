@@ -1358,7 +1358,7 @@ static inline int push_ds_2_avps( ds_dest_t *ds, ds_partition_t *partition )
 	char buf[PTR_STRING_SIZE]; /* a hexa string */
 	int_str avp_val;
 
-	avp_val.s.len = 1 + snprintf( buf, PTR_STR_SIZE, "%p", ds->sock );
+	avp_val.s.len = snprintf( buf, PTR_STR_SIZE, "%p", ds->sock );
 	avp_val.s.s = buf;
 	if(add_avp(AVP_VAL_STR| partition->sock_avp_type,
 				partition->sock_avp_name, avp_val)!=0) {
@@ -1661,13 +1661,7 @@ int ds_select_dst(struct sip_msg *msg, ds_select_ctl_p ds_select_ctl,
 		LM_ERR("cannot set selected_dst uri\n");
 		goto error;
 	}
-	if (selected->sock) {
-		selected_dst->socket.len = 1 +
-		snprintf( selected_dst->socket.s, PTR_STR_SIZE, "%p", selected->sock );
-	}
-	else {
-		selected_dst->socket.len = 0;
-	}
+	selected_dst->socket = selected->sock;
 
 	LM_DBG("selected [%d-%d/%d] <%.*s>\n",
 		ds_select_ctl->alg, ds_select_ctl->set, ds_id,
